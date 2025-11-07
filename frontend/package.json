@@ -1,0 +1,65 @@
+{
+  "name": "aiworkflowviz",
+  "displayName": "AI Workflow Visualizer",
+  "description": "Visualize AI/LLM workflows in your codebase",
+  "version": "0.1.0",
+  "publisher": "aiworkflowviz",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Visualization", "Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiworkflowviz.login",
+        "title": "AI Workflow: Login"
+      },
+      {
+        "command": "aiworkflowviz.register",
+        "title": "AI Workflow: Register"
+      },
+      {
+        "command": "aiworkflowviz.logout",
+        "title": "AI Workflow: Logout"
+      },
+      {
+        "command": "aiworkflowviz.visualize",
+        "title": "AI Workflow: Visualize Current File"
+      },
+      {
+        "command": "aiworkflowviz.visualizeWorkspace",
+        "title": "AI Workflow: Auto-detect and Visualize"
+      }
+    ],
+    "configuration": {
+      "title": "AI Workflow Visualizer",
+      "properties": {
+        "aiworkflowviz.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "Backend API URL"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/dagre": "^0.7.52",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@typescript-eslint/typescript-estree": "^6.0.0",
+    "acorn": "^8.11.0",
+    "acorn-walk": "^8.3.0",
+    "axios": "^1.6.0",
+    "dagre": "^0.8.5"
+  }
+}
