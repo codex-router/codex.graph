@@ -1,29 +1,38 @@
 # AI Workflow Visualizer
 
-VSCode extension that visualizes ANY AI/LLM workflow using Gemini 2.5 Flash and static analysis.
+VSCode extension that visualizes AI/LLM workflows using Gemini 2.5 Flash. Analyzes code containing LLM API calls and frameworks to generate interactive workflow graphs.
 
-Detects workflows from:
-- **LLM APIs**: OpenAI, Anthropic, Gemini, Groq, Ollama, Cohere, Hugging Face
-- **Frameworks**: LangGraph, Mastra, LangChain, CrewAI
-- **Custom Implementations**: Any code using LLM APIs
+## Supported Technologies
+
+**LLM APIs**: OpenAI, Anthropic, Gemini, Groq, Ollama, Cohere, Hugging Face
+**Frameworks**: LangGraph, Mastra, LangChain, CrewAI
+
+## Quick Start
+
+```bash
+make setup  # Install all dependencies
+make run    # Start backend + launch extension
+```
+
+Requirements: Python 3.8+, Node.js 16+, VSCode
 
 ## Setup
 
-### Backend
+### 1. Backend Setup
 
 ```bash
 cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and add your Gemini API key
-python main.py
 ```
 
-Backend runs on http://localhost:8000
+Create `backend/.env`:
+```bash
+GEMINI_API_KEY=your-key-here
+```
 
-### Frontend
+### 2. Frontend Setup
 
 ```bash
 cd frontend
@@ -31,45 +40,83 @@ npm install
 npm run compile
 ```
 
-Press F5 in VSCode to launch extension in debug mode.
+### 3. Launch Extension
+
+Press F5 in VSCode to open extension development host.
 
 ## Usage
 
-**Quick Start**:
-```bash
-make run
-```
+In the extension development window:
 
-Then in the new VSCode window:
 1. **Auto-detect Workspace**: `CMD+Shift+P` → "AI Workflow: Auto-detect and Visualize"
-   - Scans entire workspace for AI/LLM files
-   - Analyzes all detected files together as one workflow
-   - No file picker - fully automatic!
+   - Scans workspace for LLM-related files
+   - Analyzes all files together as unified workflow
+
 2. **Visualize Current File**: `CMD+Shift+P` → "AI Workflow: Visualize Current File"
-   - Analyze just the currently open file
+   - Analyze single file
 
-**Detected Workflow Components**:
-- **Triggers**: Webhooks, API endpoints, user input
-- **LLM Calls**: OpenAI, Anthropic, Gemini, etc.
-- **Tools**: Functions used by LLMs
-- **Decisions**: Conditional logic based on LLM output
-- **Integrations**: Slack, Jira, HTTP APIs
-- **Memory**: Conversation history
-- **Parsers**: Output structuring
-- **Output**: Final results
+**Click nodes** to view source location and jump to code.
 
-## Features
+## Workflow Components
 
-- **Universal LLM Detection**: Detects OpenAI, Anthropic, Gemini, Groq, Ollama, and more
-- **Framework Support**: LangGraph, Mastra, LangChain, CrewAI
-- **Smart Analysis**: Identifies triggers, LLM calls, tools, decisions, integrations, memory, parsers
-- **File hash-based caching**: Only re-analyze when code changes
-- **D3.js interactive graph**: Force-directed visualization
-- **JWT auth** with free trial (10 requests/day) - currently disabled for testing
+The system identifies 8 node types:
+
+- **Triggers**: Entry points (API endpoints, main functions)
+- **LLM Calls**: LLM API invocations
+- **Tools**: Functions callable by LLMs
+- **Decisions**: Conditional logic on LLM output
+- **Integrations**: External APIs, databases
+- **Memory**: State/conversation storage
+- **Parsers**: Data transformation, formatting
+- **Output**: Return statements, responses
 
 ## Architecture
 
-**Frontend**: TypeScript VSCode extension with webview
-**Backend**: FastAPI + Gemini 2.5 Flash
-**Auth**: JWT tokens
-**Caching**: Local (VSCode storage)
+**Two-part system:**
+- **Backend** (Python/FastAPI): Port 8000, uses Gemini 2.5 Flash for code analysis
+- **Frontend** (TypeScript/VSCode): D3.js + Dagre visualization in webview panel
+
+**Data Flow:**
+1. Frontend detects LLM files via regex patterns
+2. Sends code to backend `/analyze` endpoint
+3. Backend uses Gemini to extract workflow nodes/edges
+4. Frontend caches results by file hash
+5. Webview displays interactive graph
+
+**Note**: Auth is currently disabled (TODOs exist in code for re-enabling).
+
+## Development Commands
+
+```bash
+make run      # Compile frontend, start backend, launch extension
+make stop     # Stop backend server
+make debug    # Launch extension without starting backend
+make setup    # Install dependencies
+```
+
+Manual backend start:
+```bash
+cd backend
+. venv/bin/activate
+python main.py  # Runs on http://localhost:8000
+```
+
+## Key Files
+
+**Backend:**
+- `gemini_client.py` - LLM prompt for workflow extraction
+- `models.py` - Pydantic models (`WorkflowGraph`, `SourceLocation`)
+- `analyzer.py` - Static analysis patterns
+
+**Frontend:**
+- `extension.ts` - VSCode commands, file navigation
+- `webview.ts` - D3.js/Dagre visualization
+- `analyzer.ts` - Client-side LLM detection
+- `cache.ts` - Multi-file workspace caching
+
+## Adding LLM Providers
+
+1. Add import pattern to `frontend/src/analyzer.ts` → `LLM_CLIENT_PATTERNS`
+2. Add API call pattern to `frontend/src/analyzer.ts` → `LLM_CALL_PATTERNS`
+3. Add detection logic to `backend/gemini_client.py` → "DETECT LLM PROVIDERS" section
+4. Run `cd frontend && npm run compile`
