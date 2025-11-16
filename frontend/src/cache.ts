@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import { WorkflowGraph } from './api';
+import { StaticAnalyzer } from './static-analyzer';
 
 interface PerFileCacheEntry {
     filePath: string;
@@ -14,9 +15,11 @@ export class CacheManager {
     private cachePath: vscode.Uri | null = null;
     private perFileCache: Record<string, PerFileCacheEntry> = {};
     private initPromise: Promise<void>;
+    private staticAnalyzer: StaticAnalyzer;
 
     constructor(private context: vscode.ExtensionContext) {
         this.initPromise = this.initializeCache();
+        this.staticAnalyzer = new StaticAnalyzer();
     }
 
     /**
@@ -76,12 +79,107 @@ export class CacheManager {
         }
     }
 
+    /**
+     * Hash file content based on full content (fallback for non-code files)
+     */
     private hashContent(content: string): string {
         return crypto.createHash('sha256').update(content).digest('hex');
     }
 
+    /**
+     * AST-aware content hashing: only hash LLM-relevant code
+     * Ignores comments, whitespace changes, and non-LLM code
+     */
+    private hashContentAST(content: string, filePath: string): string {
+        try {
+            // Analyze file to extract LLM-relevant locations
+            const analysis = this.staticAnalyzer.analyze(content, filePath);
+
+            // Create normalized representation of LLM-relevant code
+            // Include: imports, variables, location line numbers and types
+            // Exclude: comments, whitespace, exact column numbers
+            const normalized = {
+                // LLM-related imports (sorted for consistency)
+                imports: analysis.imports.filter(imp =>
+                    /openai|anthropic|gemini|groq|ollama|cohere|langchain|langgraph|mastra|crewai/i.test(imp)
+                ).sort(),
+
+                // LLM-related variables (sorted)
+                variables: Array.from(analysis.llmRelatedVariables).sort(),
+
+                // Code locations (line + type only, ignore column for whitespace tolerance)
+                locations: analysis.locations.map(loc => ({
+                    line: loc.line,
+                    type: loc.type,
+                    function: loc.function
+                })).sort((a, b) => a.line - b.line)
+            };
+
+            // Hash the normalized representation
+            const normalizedString = JSON.stringify(normalized);
+            return crypto.createHash('sha256').update(normalizedString).digest('hex');
+        } catch (error) {
+            // Fallback to full content hash if AST parsing fails
+            console.warn(`AST-aware hashing failed for ${filePath}, using full content hash:`, error);
+            return this.hashContent(content);
+        }
+    }
+
     async clear() {
         this.perFileCache = {};
+        await this.saveCache();
+    }
+
+    /**
+     * Get cached workspace graph by combined hash of all files
+     */
+    async getWorkspace(filePaths: string[], contents: string[]): Promise<WorkflowGraph | null> {
+        await this.initPromise;
+
+        // Sort files by path BEFORE creating hashes to ensure deterministic ordering
+        const sortedFiles = filePaths
+            .map((path, i) => ({ path, content: contents[i] }))
+            .sort((a, b) => a.path.localeCompare(b.path));
+
+        // Create combined hash from sorted file hashes
+        const fileHashes = sortedFiles
+            .map(f => `${f.path}:${this.hashContentAST(f.content, f.path)}`)
+            .join('|');
+
+        const workspaceHash = crypto.createHash('sha256').update(fileHashes).digest('hex');
+        const cacheKey = `workspace:${workspaceHash}`;
+        const entry = this.perFileCache[cacheKey];
+
+        if (!entry) return null;
+        return entry.graph;
+    }
+
+    /**
+     * Cache workspace graph by combined hash of all files
+     */
+    async setWorkspace(filePaths: string[], contents: string[], graph: WorkflowGraph) {
+        await this.initPromise;
+
+        // Sort files by path BEFORE creating hashes to ensure deterministic ordering
+        const sortedFiles = filePaths
+            .map((path, i) => ({ path, content: contents[i] }))
+            .sort((a, b) => a.path.localeCompare(b.path));
+
+        // Create combined hash from sorted file hashes
+        const fileHashes = sortedFiles
+            .map(f => `${f.path}:${this.hashContentAST(f.content, f.path)}`)
+            .join('|');
+
+        const workspaceHash = crypto.createHash('sha256').update(fileHashes).digest('hex');
+        const cacheKey = `workspace:${workspaceHash}`;
+
+        this.perFileCache[cacheKey] = {
+            filePath: 'workspace',
+            contentHash: workspaceHash,
+            graph,
+            timestamp: Date.now()
+        };
+
         await this.saveCache();
     }
 
@@ -91,7 +189,8 @@ export class CacheManager {
     async getPerFile(filePath: string, content: string): Promise<WorkflowGraph | null> {
         await this.initPromise;
 
-        const contentHash = this.hashContent(content);
+        // Use AST-aware hashing for code files
+        const contentHash = this.hashContentAST(content, filePath);
         const cacheKey = `${filePath}:${contentHash}`;
         const entry = this.perFileCache[cacheKey];
 
@@ -105,7 +204,8 @@ export class CacheManager {
     async setPerFile(filePath: string, content: string, graph: WorkflowGraph) {
         await this.initPromise;
 
-        const contentHash = this.hashContent(content);
+        // Use AST-aware hashing for code files
+        const contentHash = this.hashContentAST(content, filePath);
         const cacheKey = `${filePath}:${contentHash}`;
 
         this.perFileCache[cacheKey] = {
@@ -147,7 +247,7 @@ export class CacheManager {
      */
     mergeGraphs(graphs: WorkflowGraph[]): WorkflowGraph {
         if (graphs.length === 0) {
-            return { nodes: [], edges: [], llms_detected: [] };
+            return { nodes: [], edges: [], llms_detected: [], workflows: [] };
         }
 
         if (graphs.length === 1) {
@@ -157,6 +257,7 @@ export class CacheManager {
         const mergedNodes = new Map<string, any>();
         const mergedEdges = new Map<string, any>();
         const llmsDetectedSet = new Set<string>();
+        const mergedWorkflows = new Map<string, any>();
 
         for (const graph of graphs) {
             // Merge nodes (deduplicate by id)
@@ -174,12 +275,30 @@ export class CacheManager {
             for (const llm of graph.llms_detected || []) {
                 llmsDetectedSet.add(llm);
             }
+
+            // Merge workflows (combine nodeIds for same ID)
+            for (const workflow of graph.workflows || []) {
+                const existing = mergedWorkflows.get(workflow.id);
+                if (existing) {
+                    // Merge nodeIds arrays and deduplicate
+                    const combinedNodeIds = [...new Set([...existing.nodeIds, ...workflow.nodeIds])];
+                    mergedWorkflows.set(workflow.id, {
+                        ...existing,
+                        nodeIds: combinedNodeIds,
+                        // Keep description from first workflow or combine
+                        description: existing.description || workflow.description
+                    });
+                } else {
+                    mergedWorkflows.set(workflow.id, workflow);
+                }
+            }
         }
 
         return {
             nodes: Array.from(mergedNodes.values()),
             edges: Array.from(mergedEdges.values()),
-            llms_detected: Array.from(llmsDetectedSet)
+            llms_detected: Array.from(llmsDetectedSet),
+            workflows: Array.from(mergedWorkflows.values())
         };
     }
 }

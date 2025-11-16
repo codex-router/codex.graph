@@ -63,29 +63,6 @@ export class WorkflowDetector {
         /for\s+await.*stream/,
     ];
 
-    // Workflow Keywords (data structures, types, classes)
-    private static readonly WORKFLOW_KEYWORDS = [
-        /WorkflowGraph|AnalyzeRequest|FileMetadata|LocationMetadata/,
-        /WorkflowDetector|StaticAnalyzer|MetadataBuilder/,
-        /analyze_workflow|analyzeWorkflow/,
-        /gemini_client|GeminiClient/,
-        /WebviewManager|CacheManager|APIClient/,
-        /CodeLocation|FileAnalysis/,
-    ];
-
-    // Workflow Filenames
-    private static readonly WORKFLOW_FILENAMES = [
-        /analyzer\.(py|ts|js)/,
-        /workflow\.(py|ts|js)/,
-        /gemini[_-]?client\.(py|ts|js)/,
-        /api\.(py|ts|js)/,
-        /extension\.ts/,
-        /webview\.(py|ts|js)/,
-        /cache\.(py|ts|js)/,
-        /main\.py/,
-        /models\.(py|ts|js)/,
-    ];
-
     // Framework Patterns (keep for framework-specific detection)
     private static readonly FRAMEWORK_PATTERNS = {
         langgraph: [
@@ -220,6 +197,83 @@ export class WorkflowDetector {
         return `{${patterns.join(',')}}`;
     }
 
+    /**
+     * Expand detection to files that import base LLM files (cross-file analysis)
+     * This catches files that call LLM wrappers indirectly (e.g., main.py → gemini_client.py)
+     */
+    private static async expandToImporters(
+        baseFiles: vscode.Uri[],
+        allFiles: vscode.Uri[]
+    ): Promise<vscode.Uri[]> {
+        if (baseFiles.length === 0) return [];
+
+        const importers: vscode.Uri[] = [];
+        const baseFilesSet = new Set(baseFiles.map(f => f.fsPath));
+
+        // Extract module names from base files
+        // e.g., "gemini_client.py" → "gemini_client"
+        // e.g., "gemini-client.ts" → "gemini-client" or "geminiClient"
+        const baseModuleNames = baseFiles.map(file => {
+            const filename = file.fsPath.split('/').pop() || '';
+            const nameWithoutExt = filename.replace(/\.(py|ts|js|tsx|jsx)$/, '');
+            return nameWithoutExt;
+        });
+
+        // Build import detection patterns for each base file
+        const importPatterns: RegExp[] = [];
+        for (const moduleName of baseModuleNames) {
+            // Python patterns
+            importPatterns.push(
+                new RegExp(`from\\s+${this.escapeRegex(moduleName)}\\s+import`, 'i'),
+                new RegExp(`import\\s+${this.escapeRegex(moduleName)}(?:\\s|$)`, 'i')
+            );
+
+            // TypeScript/JavaScript patterns (handle both kebab-case and camelCase)
+            // Match: import { X } from './gemini-client' or from '@/gemini-client'
+            importPatterns.push(
+                new RegExp(`from\\s+['"][^'"]*${this.escapeRegex(moduleName)}['"]`, 'i'),
+                new RegExp(`require\\s*\\(['"][^'"]*${this.escapeRegex(moduleName)}['"]\\)`, 'i')
+            );
+        }
+
+        // Search all files for imports matching base files
+        for (const file of allFiles) {
+            // Skip files already in base set
+            if (baseFilesSet.has(file.fsPath)) continue;
+
+            try {
+                const content = await vscode.workspace.fs.readFile(file);
+                const text = Buffer.from(content).toString('utf8');
+
+                // Check if file imports any base LLM file
+                const hasImport = importPatterns.some(pattern => pattern.test(text));
+
+                if (hasImport) {
+                    importers.push(file);
+                }
+            } catch (error) {
+                // Skip files that can't be read
+                continue;
+            }
+        }
+
+        // Optional: Expand one more level (find files that import the importers)
+        // This catches chains like: endpoint.py → main.py → gemini_client.py
+        if (importers.length > 0 && importers.length < 20) {  // Limit to prevent explosion
+            const secondLevelImporters = await this.expandToImporters(importers, allFiles);
+            return [...importers, ...secondLevelImporters];
+        }
+
+        return importers;
+    }
+
+    /**
+     * Escape special regex characters in a string
+     */
+    private static escapeRegex(str: string): string {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     static async detectInWorkspace(): Promise<vscode.Uri[]> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders) return [];
@@ -238,27 +292,35 @@ export class WorkflowDetector {
             files.push(...found);
         }
 
-        const workflowFiles: vscode.Uri[] = [];
+        // Step 1: Detect base LLM files (files with direct LLM SDK usage)
+        const baseWorkflowFiles: vscode.Uri[] = [];
 
         for (const file of files) {
             const content = await vscode.workspace.fs.readFile(file);
             const text = Buffer.from(content).toString('utf8');
 
             if (this.detectWorkflow(text, file.fsPath)) {
-                workflowFiles.push(file);
+                baseWorkflowFiles.push(file);
             }
         }
 
-        // Sort for deterministic results
-        workflowFiles.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+        // Step 2: Expand to files that import base LLM files (cross-file analysis)
+        const expandedFiles = await this.expandToImporters(baseWorkflowFiles, files);
 
-        return workflowFiles;
+        // Combine and deduplicate
+        const allWorkflowFiles = [...new Set([...baseWorkflowFiles, ...expandedFiles])];
+
+        // Sort for deterministic results
+        allWorkflowFiles.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+
+        return allWorkflowFiles;
     }
 
     static detectWorkflow(content: string, filePath?: string): boolean {
-        // Multi-pass detection: AST → Direct LLM → Keywords → Filename
+        // Two-pass detection: AST-based (accurate) → Direct LLM patterns (fallback)
 
         // Pass 1: AST-based detection (most accurate)
+        // Parses the code and looks for actual LLM API calls and imports
         if (filePath) {
             try {
                 const analysis = staticAnalyzer.analyze(content, filePath);
@@ -276,31 +338,26 @@ export class WorkflowDetector {
             }
         }
 
-        // Pass 2: Direct LLM usage detection
+        // Pass 2: Direct LLM usage detection (regex fallback)
+        // Looks for LLM imports AND API calls together
         const hasLLMClient = this.LLM_CLIENT_PATTERNS.some(pattern => pattern.test(content));
         const hasLLMCalls = this.LLM_CALL_PATTERNS.some(pattern => pattern.test(content));
         const hasFramework = Object.values(this.FRAMEWORK_PATTERNS).some(patterns =>
             patterns.some(pattern => pattern.test(content))
         );
 
+        // Only match if file has BOTH imports AND calls, or uses a framework
         if ((hasLLMClient && hasLLMCalls) || hasFramework) {
             return true;
         }
 
-        // Pass 3: Workflow data structures and keywords
-        const hasWorkflowKeywords = this.WORKFLOW_KEYWORDS.some(pattern => pattern.test(content));
-        if (hasWorkflowKeywords) {
-            return true;
-        }
-
-        // Pass 4: Workflow-related filename
-        if (filePath) {
-            const filename = filePath.split('/').pop() || '';
-            const hasWorkflowFilename = this.WORKFLOW_FILENAMES.some(pattern => pattern.test(filename));
-            if (hasWorkflowFilename) {
-                return true;
-            }
-        }
+        // NOTE: Removed Pass 3 (Workflow Keywords) and Pass 4 (Workflow Filenames)
+        // These were too broad and matched files that just imported workflow types
+        // or had workflow-related names without actually calling LLMs.
+        //
+        // The backend prompt is responsible for filtering out files not in the
+        // LLM execution path. This frontend filter should only identify files
+        // that potentially interact with LLMs directly.
 
         return false;
     }

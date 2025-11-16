@@ -67,7 +67,14 @@ class GraphEdge(BaseModel):
     sourceLocation: Optional[SourceLocation] = None  # Where variable is passed in code
     isCriticalPath: Optional[bool] = False  # Part of longest execution path
 
+class WorkflowMetadata(BaseModel):
+    id: str  # "workflow_1", "workflow_2", etc.
+    name: str  # Descriptive name (e.g., "Document Analysis Pipeline")
+    description: str  # 1-2 sentence description of workflow purpose
+    nodeIds: List[str]  # List of node IDs that belong to this workflow
+
 class WorkflowGraph(BaseModel):
     nodes: List[GraphNode]
     edges: List[GraphEdge]
     llms_detected: List[str]
+    workflows: List[WorkflowMetadata] = []  # Workflow groupings identified by LLM

@@ -40,10 +40,18 @@ export interface FileMetadata {
     relatedFiles: string[];
 }
 
+export interface WorkflowMetadata {
+    id: string;
+    name: string;
+    description: string;
+    nodeIds: string[];
+}
+
 export interface WorkflowGraph {
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
     llms_detected: string[];
+    workflows: WorkflowMetadata[];
 }
 
 export class APIClient {

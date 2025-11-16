@@ -82,8 +82,42 @@ async def analyze_workflow(
         if result.endswith("```"):
             result = result[:-3]
 
-        graph_data = json.loads(result.strip())
+        # Try to parse JSON
+        try:
+            graph_data = json.loads(result.strip())
+        except json.JSONDecodeError as json_err:
+            # Attempt to recover from truncated JSON
+            result_clean = result.strip()
+
+            # Try to close unclosed structures
+            if not result_clean.endswith('}'):
+                # Count braces to determine how many to add
+                open_braces = result_clean.count('{') - result_clean.count('}')
+                open_brackets = result_clean.count('[') - result_clean.count(']')
+
+                # Remove any incomplete trailing element (after last comma)
+                last_comma = result_clean.rfind(',')
+                if last_comma > result_clean.rfind('}') and last_comma > result_clean.rfind(']'):
+                    result_clean = result_clean[:last_comma]
+
+                # Close arrays first, then objects
+                result_clean += ']' * max(0, open_brackets)
+                result_clean += '}' * max(0, open_braces)
+
+                try:
+                    graph_data = json.loads(result_clean)
+                except:
+                    # If recovery fails, raise original error with better message
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Analysis failed: Response was truncated. Try analyzing fewer files at once. Original error: {str(json_err)}"
+                    )
+            else:
+                raise
+
         return WorkflowGraph(**graph_data)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 

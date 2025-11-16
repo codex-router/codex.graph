@@ -9,6 +9,18 @@ import { metadataBuilder, FileMetadata } from './metadata-builder';
 const outputChannel = vscode.window.createOutputChannel('AI Workflow Visualizer');
 
 /**
+ * Log message with timestamp
+ */
+function log(message: string): void {
+    const now = new Date();
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const seconds = now.getSeconds().toString().padStart(2, '0');
+    const timestamp = `${hours}:${minutes}:${seconds}`;
+    outputChannel.appendLine(`[${timestamp}] ${message}`);
+}
+
+/**
  * Estimate tokens for a string (rough approximation: 1 token ≈ 4 chars)
  */
 function estimateTokens(text: string): number {
@@ -111,19 +123,19 @@ function createDependencyBatches(
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    outputChannel.appendLine('AI Workflow Visualizer activating...');
+    log('AI Workflow Visualizer activating...');
 
     const config = vscode.workspace.getConfiguration('aiworkflowviz');
     const apiUrl = config.get<string>('apiUrl', 'http://localhost:8000');
 
-    outputChannel.appendLine(`Backend API URL: ${apiUrl}`);
+    log(`Backend API URL: ${apiUrl}`);
 
     const api = new APIClient(apiUrl, outputChannel);
     const auth = new AuthManager(context, api);
     const cache = new CacheManager(context);
     const webview = new WebviewManager(context);
 
-    outputChannel.appendLine('Extension activated successfully');
+    log('Extension activated successfully');
     outputChannel.show();
 
     context.subscriptions.push(
@@ -149,11 +161,11 @@ export function activate(context: vscode.ExtensionContext) {
         const content = document.getText();
         const filePath = document.uri.fsPath;
 
-        outputChannel.appendLine(`Visualizing file: ${filePath}${bypassCache ? ' (bypassing cache)' : ''}`);
+        log(`Visualizing file: ${filePath}${bypassCache ? ' (bypassing cache)' : ''}`);
 
         if (!WorkflowDetector.isWorkflowFile(document.uri)) {
             vscode.window.showWarningMessage('File type not supported');
-            outputChannel.appendLine(`File type not supported: ${filePath}`);
+            log(`File type not supported: ${filePath}`);
             return;
         }
 
@@ -169,32 +181,41 @@ export function activate(context: vscode.ExtensionContext) {
                 vscode.window.showInformationMessage('Analyzing workflow...');
                 webview.notifyAnalysisStarted();
 
+                // Track analysis start time
+                const startTime = Date.now();
+
                 // Build metadata using static analysis
-                outputChannel.appendLine(`Building metadata with static analysis...`);
+                log(`Building metadata with static analysis...`);
                 const metadata = await metadataBuilder.buildSingleFileMetadata(document.uri);
-                outputChannel.appendLine(`Found ${metadata.locations.length} code locations`);
+                log(`Found ${metadata.locations.length} code locations`);
 
                 const framework = WorkflowDetector.detectFramework(content);
-                outputChannel.appendLine(`Detected framework: ${framework || 'none'}`);
+                log(`Detected framework: ${framework || 'none'}`);
 
                 const relativePath = vscode.workspace.asRelativePath(filePath);
                 const sizeKb = Math.round(content.length / 1024);
-                outputChannel.appendLine(`File: ${relativePath} (${sizeKb} KB)`);
-                outputChannel.appendLine(`Sending POST /analyze: 1 file, framework: ${framework || 'none'}`);
+                log(`File: ${relativePath} (${sizeKb} KB)`);
+                log(`Sending POST /analyze: 1 file, framework: ${framework || 'none'}`);
 
                 graph = await api.analyzeWorkflow(content, [filePath], framework || undefined, [metadata]);
                 await cache.setPerFile(filePath, content, graph);
-                outputChannel.appendLine(`Analysis complete, cached result`);
+
+                // Calculate and log duration
+                const duration = Date.now() - startTime;
+                const minutes = Math.floor(duration / 60000);
+                const seconds = Math.floor((duration % 60000) / 1000);
+                const timeStr = minutes > 0 ? `${minutes} minute${minutes !== 1 ? 's' : ''} ${seconds} second${seconds !== 1 ? 's' : ''}` : `${seconds} second${seconds !== 1 ? 's' : ''}`;
+                log(`Analysis complete in ${timeStr}, cached result`);
                 webview.notifyAnalysisComplete(true);
             } else {
-                outputChannel.appendLine(`Using cached result for ${filePath}`);
+                log(`Using cached result for ${filePath}`);
             }
 
             webview.show(graph);
         } catch (error: any) {
-            outputChannel.appendLine(`ERROR: ${error.message}`);
-            outputChannel.appendLine(`Status: ${error.response?.status}`);
-            outputChannel.appendLine(`Response: ${JSON.stringify(error.response?.data)}`);
+            log(`ERROR: ${error.message}`);
+            log(`Status: ${error.response?.status}`);
+            log(`Response: ${JSON.stringify(error.response?.data)}`);
             const errorMsg = error.response?.data?.detail || error.message;
             webview.notifyAnalysisComplete(false, errorMsg);
             vscode.window.showErrorMessage(`Analysis failed: ${errorMsg}`);
@@ -209,91 +230,117 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('aiworkflowviz.refresh', async () => {
-            await analyzeCurrentFile(true);
+            // Confirm before clearing cache
+            const confirm = await vscode.window.showWarningMessage(
+                'This will clear all cached analysis and reanalyze the entire workspace. Continue?',
+                { modal: true },
+                'Yes',
+                'No'
+            );
+
+            if (confirm === 'Yes') {
+                log('Clearing cache...');
+                await cache.clear();
+                log('Cache cleared successfully, reanalyzing workspace');
+                await analyzeWorkspace(true);
+            }
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('aiworkflowviz.visualizeWorkspace', async () => {
-            // TODO: Re-enable auth when ready
-            // if (!auth.isAuthenticated()) {
-            //     vscode.window.showWarningMessage('Please login first');
-            //     return;
-            // }
+    async function analyzeWorkspace(bypassCache: boolean = false) {
+        // TODO: Re-enable auth when ready
+        // if (!auth.isAuthenticated()) {
+        //     vscode.window.showWarningMessage('Please login first');
+        //     return;
+        // }
 
-            vscode.window.showInformationMessage('Scanning workspace for AI workflows...');
-            outputChannel.appendLine('Starting workspace scan...');
-            outputChannel.appendLine(`Workspace root: ${vscode.workspace.workspaceFolders?.[0]?.uri.fsPath}`);
+        // Show notification with timeout (5 seconds)
+        vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Scanning workspace for AI workflows...',
+            cancellable: false
+        }, async (progress) => {
+            // Keep notification visible for 5 seconds
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        });
 
-            try {
-                const workflowFiles = await WorkflowDetector.detectInWorkspace();
-                outputChannel.appendLine(`Found ${workflowFiles.length} workflow files:`);
+        // Track analysis start time
+        const startTime = Date.now();
 
-                if (workflowFiles.length === 0) {
-                    vscode.window.showInformationMessage('No AI workflow files found in workspace');
-                    return;
-                }
+        log('Starting workspace scan...');
+        log(`Workspace root: ${vscode.workspace.workspaceFolders?.[0]?.uri.fsPath}`);
 
-                // Read all workflow files
-                const fileContents: { path: string; content: string; }[] = [];
-                for (const uri of workflowFiles) {
-                    const relativePath = vscode.workspace.asRelativePath(uri);
-                    outputChannel.appendLine(`  - ${relativePath}`);
+        try {
+            const workflowFiles = await WorkflowDetector.detectInWorkspace();
+            log(`Found ${workflowFiles.length} workflow files:`);
 
-                    const content = await vscode.workspace.fs.readFile(uri);
-                    const text = Buffer.from(content).toString('utf8');
-                    fileContents.push({
-                        path: uri.fsPath,
-                        content: text
-                    });
-                }
+            if (workflowFiles.length === 0) {
+                vscode.window.showInformationMessage('No AI workflow files found in workspace');
+                return;
+            }
 
-                const allPaths = fileContents.map(f => f.path);
+            // Read all workflow files
+            const fileContents: { path: string; content: string; }[] = [];
+            for (const uri of workflowFiles) {
+                const relativePath = vscode.workspace.asRelativePath(uri);
+                log(`  - ${relativePath}`);
 
-                // Check per-file cache first
-                const allContents = fileContents.map(f => f.content);
-                const { cachedGraphs, uncachedFiles } = await cache.getMultiplePerFile(allPaths, allContents);
+                const content = await vscode.workspace.fs.readFile(uri);
+                const text = Buffer.from(content).toString('utf8');
+                fileContents.push({
+                    path: uri.fsPath,
+                    content: text
+                });
+            }
 
-                outputChannel.appendLine(`\nCache status: ${cachedGraphs.length} files cached, ${uncachedFiles.length} files need analysis`);
+            const allPaths = fileContents.map(f => f.path);
+            const allContents = fileContents.map(f => f.content);
 
-                let graph;
-                if (uncachedFiles.length === 0) {
-                    // All files cached
-                    outputChannel.appendLine(`Using cached results for all ${workflowFiles.length} files`);
-                    graph = cache.mergeGraphs(cachedGraphs);
+            // Check workspace-level cache first (unless bypassing)
+            let graph;
+            if (!bypassCache) {
+                log(`\nChecking workspace cache for ${workflowFiles.length} files...`);
+                const cachedGraph = await cache.getWorkspace(allPaths, allContents);
+                if (cachedGraph) {
+                    log(`✓ Cache HIT: Using cached workspace graph (${cachedGraph.nodes.length} nodes, ${cachedGraph.edges.length} edges)`);
+                    graph = cachedGraph;
                 } else {
-                    // Analyze uncached files in batches
+                    log(`✗ Cache MISS: Analyzing all ${workflowFiles.length} files`);
+                }
+            } else {
+                log(`\nBypassing cache, analyzing all ${workflowFiles.length} files`);
+            }
+
+            if (!graph) {
+                    // Analyze all files in batches
                     webview.notifyAnalysisStarted();
 
-                    // Build metadata only for uncached files
-                    outputChannel.appendLine(`\nBuilding metadata for ${uncachedFiles.length} uncached files...`);
-                    const uncachedUris = workflowFiles.filter(uri =>
-                        uncachedFiles.some(f => f.path === uri.fsPath)
-                    );
-                    const metadata = await metadataBuilder.buildMetadata(uncachedUris);
+                    // Build metadata for all files
+                    log(`\nBuilding metadata for ${workflowFiles.length} files...`);
+                    const metadata = await metadataBuilder.buildMetadata(workflowFiles);
                     const totalLocations = metadata.reduce((sum, m) => sum + m.locations.length, 0);
-                    outputChannel.appendLine(`Found ${totalLocations} code locations`);
+                    log(`Found ${totalLocations} code locations`);
 
                     // Create dependency-based batches with token limits
-                    const batches = createDependencyBatches(uncachedFiles, metadata, 15, 800000);
-                    outputChannel.appendLine(`\nCreated ${batches.length} batches based on file dependencies:`);
+                    const batches = createDependencyBatches(fileContents, metadata, 15, 800000);
+                    log(`\nCreated ${batches.length} batches based on file dependencies:`);
                     for (let i = 0; i < batches.length; i++) {
                         const batchTokens = batches[i].reduce((sum, f) => sum + estimateTokens(f.content), 0);
-                        outputChannel.appendLine(`  Batch ${i + 1}: ${batches[i].length} files (~${Math.round(batchTokens / 1000)}k tokens)`);
+                        log(`  Batch ${i + 1}: ${batches[i].length} files (~${Math.round(batchTokens / 1000)}k tokens)`);
                     }
 
-                    // Detect framework from uncached files
+                    // Detect framework from all files
                     let framework: string | null = null;
-                    for (const file of uncachedFiles) {
+                    for (const file of fileContents) {
                         framework = WorkflowDetector.detectFramework(file.content);
                         if (framework) break;
                     }
 
-                    outputChannel.appendLine(`Detected framework: ${framework || 'generic LLM usage'}`);
+                    log(`Detected framework: ${framework || 'generic LLM usage'}`);
 
                     // Analyze batches in parallel (limit concurrency to avoid rate limits)
                     const newGraphs: any[] = [];
-                    const maxConcurrency = 3;
+                    const maxConcurrency = 10;  // Gemini Flash supports ~25 req/sec (1500 RPM)
 
                     // Process batches in chunks of maxConcurrency
                     for (let chunkStart = 0; chunkStart < batches.length; chunkStart += maxConcurrency) {
@@ -321,12 +368,12 @@ export function activate(context: vscode.ExtensionContext) {
                         const batchPaths = batch.map(f => f.path);
                         const batchMetadata = allMetadata.filter(m => batchPaths.includes(m.file));
 
-                        outputChannel.appendLine(`\nAnalyzing batch ${batchIndex + 1}/${totalBatches} (${batch.length} files)...`);
-                        outputChannel.appendLine(`Files in batch:`);
+                        log(`\nAnalyzing batch ${batchIndex + 1}/${totalBatches} (${batch.length} files)...`);
+                        log(`Files in batch:`);
                         batch.forEach(f => {
                             const relativePath = vscode.workspace.asRelativePath(f.path);
                             const sizeKb = Math.round(f.content.length / 1024);
-                            outputChannel.appendLine(`  - ${relativePath} (${sizeKb} KB)`);
+                            log(`  - ${relativePath} (${sizeKb} KB)`);
                         });
                         vscode.window.showInformationMessage(`Analyzing batch ${batchIndex + 1}/${totalBatches}...`);
 
@@ -336,7 +383,7 @@ export function activate(context: vscode.ExtensionContext) {
                                 `# File: ${f.path}\n${f.content}`
                             ).join('\n\n');
 
-                            outputChannel.appendLine(`Sending POST /analyze: ${batch.length} file(s), framework: ${framework || 'none'}`);
+                            log(`Sending POST /analyze: ${batch.length} file(s), framework: ${framework || 'none'}`);
                             const batchGraph = await api.analyzeWorkflow(
                                 combinedBatchCode,
                                 batchPaths,
@@ -344,62 +391,80 @@ export function activate(context: vscode.ExtensionContext) {
                                 batchMetadata
                             );
 
-                            // Cache the full batch graph for each file in the batch
-                            // This way, editing one file will only re-analyze its batch, not all files
-                            for (const file of batch) {
-                                await cacheManager.setPerFile(file.path, file.content, batchGraph);
-                            }
-
                             graphs.push(batchGraph);
-                            outputChannel.appendLine(`Batch ${batchIndex + 1} complete: ${batchGraph.nodes.length} nodes, ${batchGraph.edges.length} edges`);
+                            log(`Batch ${batchIndex + 1} complete: ${batchGraph.nodes.length} nodes, ${batchGraph.edges.length} edges`);
                         } catch (batchError: any) {
                             // If batch fails (safety filter, etc), try analyzing files individually
-                            outputChannel.appendLine(`Batch ${batchIndex + 1} failed: ${batchError.message}`);
-                            outputChannel.appendLine(`Falling back to individual file analysis for this batch...`);
+                            log(`Batch ${batchIndex + 1} failed: ${batchError.message}`);
+                            log(`Falling back to individual file analysis for this batch...`);
 
-                            for (let fileIndex = 0; fileIndex < batch.length; fileIndex++) {
-                                const file = batch[fileIndex];
-                                const fileMeta = batchMetadata.find(m => m.file === file.path);
-
-                                try {
+                            // Parallelize individual file analysis (use same concurrency limit)
+                            const fallbackPromises = batch.map((file, fileIndex) => {
+                                return async () => {
+                                    const fileMeta = batchMetadata.find(m => m.file === file.path);
                                     const relativePath = vscode.workspace.asRelativePath(file.path);
                                     const sizeKb = Math.round(file.content.length / 1024);
-                                    outputChannel.appendLine(`  Analyzing file ${fileIndex + 1}/${batch.length}: ${relativePath} (${sizeKb} KB)`);
-                                    outputChannel.appendLine(`  Sending POST /analyze: 1 file, framework: ${framework || 'none'}`);
 
-                                    const fileGraph = await api.analyzeWorkflow(
-                                        `# File: ${file.path}\n${file.content}`,
-                                        [file.path],
-                                        framework || undefined,
-                                        fileMeta ? [fileMeta] : []
-                                    );
+                                    try {
+                                        log(`  Analyzing file ${fileIndex + 1}/${batch.length}: ${relativePath} (${sizeKb} KB)`);
+                                        log(`  Sending POST /analyze: 1 file, framework: ${framework || 'none'}`);
 
-                                    await cacheManager.setPerFile(file.path, file.content, fileGraph);
-                                    graphs.push(fileGraph);
-                                } catch (fileError: any) {
-                                    outputChannel.appendLine(`  Failed to analyze ${file.path}: ${fileError.message}`);
-                                    // Continue with other files
-                                }
+                                        const fileGraph = await api.analyzeWorkflow(
+                                            `# File: ${file.path}\n${file.content}`,
+                                            [file.path],
+                                            framework || undefined,
+                                            fileMeta ? [fileMeta] : []
+                                        );
+
+                                        graphs.push(fileGraph);
+                                        log(`  Fallback file complete: ${fileGraph.nodes.length} nodes`);
+                                    } catch (fileError: any) {
+                                        log(`  Failed to analyze ${file.path}: ${fileError.message}`);
+                                        // Continue with other files
+                                    }
+                                };
+                            });
+
+                            // Process fallback files in parallel chunks
+                            for (let i = 0; i < fallbackPromises.length; i += maxConcurrency) {
+                                const chunk = fallbackPromises.slice(i, i + maxConcurrency);
+                                await Promise.all(chunk.map(fn => fn()));
                             }
                         }
                     }
 
-                    // Merge cached + new graphs
-                    graph = cache.mergeGraphs([...cachedGraphs, ...newGraphs]);
+                    // Merge all batch graphs into final workspace graph
+                    graph = cache.mergeGraphs(newGraphs);
 
-                    outputChannel.appendLine(`\nAnalysis complete: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+                    // Cache the final workspace graph
+                    await cache.setWorkspace(allPaths, allContents, graph);
+                    log(`\n✓ Saved to cache: workspace graph with ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+
+                    // Calculate and log duration
+                    const duration = Date.now() - startTime;
+                    const minutes = Math.floor(duration / 60000);
+                    const seconds = Math.floor((duration % 60000) / 1000);
+                    const timeStr = minutes > 0 ? `${minutes} minute${minutes !== 1 ? 's' : ''} ${seconds} second${seconds !== 1 ? 's' : ''}` : `${seconds} second${seconds !== 1 ? 's' : ''}`;
+
+                    log(`\nAnalysis complete: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+                    log(`Total time: ${timeStr}`);
                     webview.notifyAnalysisComplete(true);
                 }
 
-                webview.show(graph);
-            } catch (error: any) {
-                outputChannel.appendLine(`ERROR: ${error.message}`);
-                outputChannel.appendLine(`Status: ${error.response?.status}`);
-                outputChannel.appendLine(`Response: ${JSON.stringify(error.response?.data)}`);
-                const errorMsg = error.response?.data?.detail || error.message;
-                webview.notifyAnalysisComplete(false, errorMsg);
-                vscode.window.showErrorMessage(`Workspace scan failed: ${errorMsg}`);
-            }
+            webview.show(graph);
+        } catch (error: any) {
+            log(`ERROR: ${error.message}`);
+            log(`Status: ${error.response?.status}`);
+            log(`Response: ${JSON.stringify(error.response?.data)}`);
+            const errorMsg = error.response?.data?.detail || error.message;
+            webview.notifyAnalysisComplete(false, errorMsg);
+            vscode.window.showErrorMessage(`Workspace scan failed: ${errorMsg}`);
+        }
+    }
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('aiworkflowviz.visualizeWorkspace', async () => {
+            await analyzeWorkspace(false);
         })
     );
 }

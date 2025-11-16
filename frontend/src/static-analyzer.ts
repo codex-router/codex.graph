@@ -1,4 +1,5 @@
 import * as acorn from 'acorn';
+const tsParser = require('@typescript-eslint/typescript-estree');
 
 export interface CodeLocation {
     line: number;
@@ -26,15 +27,7 @@ export class StaticAnalyzer {
             if (filePath.endsWith('.py')) {
                 return this.analyzePython(code, filePath);
             } else if (filePath.endsWith('.ts') || filePath.endsWith('.tsx')) {
-                // TypeScript files: Skip AST parsing (Acorn is JS-only)
-                // Frontend TS files are VSCode extension code, not LLM workflows
-                return {
-                    filePath,
-                    locations: [],
-                    imports: [],
-                    exports: [],
-                    llmRelatedVariables: new Set()
-                };
+                return this.analyzeTypeScript(code, filePath);
             } else if (filePath.endsWith('.js') || filePath.endsWith('.jsx')) {
                 return this.analyzeJavaScript(code, filePath);
             } else {
@@ -295,6 +288,199 @@ export class StaticAnalyzer {
         }
 
         return false;
+    }
+
+    private analyzeTypeScript(code: string, filePath: string): FileAnalysis {
+        try {
+            const ast = tsParser.parse(code, {
+                loc: true,
+                range: true,
+                ecmaVersion: 2020,
+                sourceType: 'module'
+            });
+
+            const locations: CodeLocation[] = [];
+            const imports: string[] = [];
+            const exports: string[] = [];
+            const llmRelatedVariables = new Set<string>();
+            const seenLocations = new Set<string>();
+            let currentFunction = 'global';
+
+            // Helper to check if identifier is LLM-related
+            const isLLMIdentifier = (name: string): boolean => {
+                const llmPatterns = [
+                    /openai/i, /anthropic/i, /gemini/i, /genai/i,
+                    /groq/i, /ollama/i, /cohere/i, /gpt/i, /claude/i,
+                    /llm/i, /model/i, /client/i, /chat/i, /completion/i
+                ];
+                return llmPatterns.some(pattern => pattern.test(name));
+            };
+
+            // Helper to add location without duplicates
+            const addLocation = (loc: CodeLocation) => {
+                const key = `${loc.line}-${loc.type}`;
+                if (!seenLocations.has(key)) {
+                    seenLocations.add(key);
+                    locations.push(loc);
+                }
+            };
+
+            // Walk the AST (TypeScript AST is similar to ESTree)
+            const walkNode = (node: any, parent?: any): void => {
+                if (!node || typeof node !== 'object') return;
+
+                // Track current function context
+                if (node.type === 'FunctionDeclaration' || node.type === 'ArrowFunctionExpression' ||
+                    node.type === 'FunctionExpression' || node.type === 'MethodDefinition') {
+                    const funcName = node.id?.name || node.key?.name || 'anonymous';
+                    const oldFunc = currentFunction;
+                    currentFunction = funcName;
+                    if (node.body) walkNode(node.body, node);
+                    currentFunction = oldFunc;
+                    return;
+                }
+
+                // Track imports
+                if (node.type === 'ImportDeclaration') {
+                    const source = node.source?.value;
+                    if (source) {
+                        imports.push(source);
+
+                        // Track LLM client imports
+                        if (isLLMIdentifier(source)) {
+                            node.specifiers?.forEach((spec: any) => {
+                                const name = spec.local?.name || spec.imported?.name;
+                                if (name) llmRelatedVariables.add(name);
+                            });
+                        }
+                    }
+                }
+
+                // Track exports
+                if (node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration') {
+                    const name = node.declaration?.id?.name || node.declaration?.name;
+                    if (name) exports.push(name);
+                }
+
+                // Track variable declarations (LLM client initialization)
+                if (node.type === 'VariableDeclaration') {
+                    node.declarations?.forEach((decl: any) => {
+                        const varName = decl.id?.name;
+                        const init = decl.init;
+
+                        if (varName && init) {
+                            if (init.type === 'NewExpression' && isLLMIdentifier(init.callee?.name || '')) {
+                                llmRelatedVariables.add(varName);
+                                if (node.loc) {
+                                    addLocation({
+                                        line: node.loc.start.line,
+                                        column: node.loc.start.column,
+                                        type: 'llm',
+                                        description: `Initialize ${init.callee.name} client`,
+                                        function: currentFunction,
+                                        variable: varName
+                                    });
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // Track call expressions (LLM API calls)
+                if (node.type === 'CallExpression' || node.type === 'AwaitExpression') {
+                    const callNode = node.type === 'AwaitExpression' ? node.argument : node;
+                    if (callNode?.type === 'CallExpression') {
+                        // Extract callee path (e.g., "client.chat.completions.create")
+                        let callee = '';
+                        if (callNode.callee?.type === 'Identifier') {
+                            callee = callNode.callee.name;
+                        } else if (callNode.callee?.type === 'MemberExpression') {
+                            const parts: string[] = [];
+                            let current = callNode.callee;
+                            while (current) {
+                                if (current.type === 'MemberExpression') {
+                                    if (current.property?.name) parts.unshift(current.property.name);
+                                    current = current.object;
+                                } else if (current.type === 'Identifier') {
+                                    parts.unshift(current.name);
+                                    break;
+                                } else {
+                                    break;
+                                }
+                            }
+                            callee = parts.join('.');
+                        }
+
+                        if (this.containsLLMVariable(callNode.callee, llmRelatedVariables) || isLLMIdentifier(callee)) {
+                            if (callNode.loc) {
+                                addLocation({
+                                    line: callNode.loc.start.line,
+                                    column: callNode.loc.start.column,
+                                    type: 'llm',
+                                    description: `Call ${callee}()`,
+                                    function: currentFunction
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Track return statements
+                if (node.type === 'ReturnStatement' && node.loc) {
+                    addLocation({
+                        line: node.loc.start.line,
+                        column: node.loc.start.column,
+                        type: 'output',
+                        description: 'Return statement',
+                        function: currentFunction
+                    });
+                }
+
+                // Track if statements (decisions)
+                if (node.type === 'IfStatement' && node.loc) {
+                    addLocation({
+                        line: node.loc.start.line,
+                        column: node.loc.start.column,
+                        type: 'decision',
+                        description: 'Conditional logic',
+                        function: currentFunction
+                    });
+                }
+
+                // Walk children
+                for (const key in node) {
+                    if (key === 'loc' || key === 'range' || key === 'parent') continue;
+                    const child = node[key];
+                    if (Array.isArray(child)) {
+                        child.forEach(c => walkNode(c, node));
+                    } else if (child && typeof child === 'object') {
+                        walkNode(child, node);
+                    }
+                }
+            };
+
+            walkNode(ast);
+
+            return {
+                filePath,
+                locations,
+                imports,
+                exports,
+                llmRelatedVariables
+            };
+        } catch (error) {
+            console.error(`Failed to parse TypeScript ${filePath}:`, error);
+            if (error instanceof Error) {
+                console.error(`Error details: ${error.message}`);
+            }
+            return {
+                filePath,
+                locations: [],
+                imports: [],
+                exports: [],
+                llmRelatedVariables: new Set()
+            };
+        }
     }
 
     private analyzePython(code: string, filePath: string): FileAnalysis {

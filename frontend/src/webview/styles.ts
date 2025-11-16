@@ -54,6 +54,27 @@ export const webviewStyles = `
         background: var(--vscode-toolbar-hoverBackground);
         border-color: var(--vscode-contrastBorder);
     }
+    #controls button.expand-btn {
+        color: #9C27B0;
+    }
+    #controls button.expand-btn:hover {
+        background: rgba(156, 39, 176, 0.1);
+        border-color: #9C27B0;
+    }
+    #controls button.format-btn {
+        color: #2196F3;
+    }
+    #controls button.format-btn:hover {
+        background: rgba(33, 150, 243, 0.1);
+        border-color: #2196F3;
+    }
+    #controls button.refresh-btn {
+        color: #f44336;
+    }
+    #controls button.refresh-btn:hover {
+        background: rgba(244, 67, 54, 0.1);
+        border-color: #f44336;
+    }
     #controls button svg {
         width: 16px;
         height: 16px;
@@ -86,10 +107,22 @@ export const webviewStyles = `
         opacity: 1;
         pointer-events: all;
         cursor: pointer;
+        transition: stroke-width 0.2s ease, fill 0.2s ease, stroke 0.2s ease, rx 0.2s ease, ry 0.2s ease;
     }
     .node:hover rect {
-        stroke-width: 3px;
+        stroke-width: 4px;
         fill: var(--vscode-list-hoverBackground);
+        stroke: #00d9ff;
+        rx: 8;
+        ry: 8;
+    }
+    .node rect.entry-point:hover {
+        stroke: #66BB6A !important;
+        stroke-width: 4px !important;
+    }
+    .node rect.exit-point:hover {
+        stroke: #42A5F5 !important;
+        stroke-width: 4px !important;
     }
     .node-icon {
         pointer-events: none;
@@ -115,23 +148,18 @@ export const webviewStyles = `
         stroke: var(--vscode-editor-foreground);
         stroke-opacity: 0.6;
         stroke-width: 2px;
+        transition: stroke 0.2s ease, stroke-width 0.2s ease;
     }
     .link.critical-path {
-        stroke-width: 4px !important;
-        stroke-opacity: 1 !important;
-        stroke: #FF6B6B !important;
-    }
-    .node rect.critical-path {
-        stroke-width: 4px !important;
-        stroke: #FF6B6B !important;
+        stroke-width: 4px;
+        stroke-opacity: 1;
+        stroke: #FF6B6B;
     }
     .node rect.entry-point {
-        stroke-dasharray: 5, 5 !important;
         stroke: #4CAF50 !important;
         stroke-width: 3px !important;
     }
     .node rect.exit-point {
-        stroke-dasharray: 5, 5 !important;
         stroke: #2196F3 !important;
         stroke-width: 3px !important;
     }
@@ -161,12 +189,16 @@ export const webviewStyles = `
         cursor: pointer;
         transition: fill 0.2s, fill-opacity 0.2s;
     }
+    .link-label-group:hover .link-label {
+        transform: scale(1.1);
+        transition: transform 0.2s ease;
+        fill: #000000;
+    }
     .link-label-group:hover .link-label-bg {
+        transform: scale(1.1);
+        transition: transform 0.2s ease;
         fill: #00d9ff;
         fill-opacity: 1;
-    }
-    .link-label-group:hover .link-label {
-        fill: #000000;
     }
     .edge-tooltip {
         position: fixed;
@@ -185,6 +217,22 @@ export const webviewStyles = `
     }
     .edge-tooltip strong {
         color: var(--vscode-textLink-foreground);
+    }
+    .button-tooltip {
+        position: fixed;
+        background: var(--vscode-editor-background);
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        font-size: 11px;
+        z-index: 10001;
+        pointer-events: none;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+    .button-tooltip.visible {
+        opacity: 1;
     }
     .loading-indicator {
         position: fixed;
@@ -315,6 +363,62 @@ export const webviewStyles = `
     .source-link:hover {
         text-decoration: underline;
         background: var(--vscode-list-hoverBackground);
+    }
+    .legend {
+        position: fixed;
+        bottom: 174px;
+        left: 16px;
+        width: 200px;
+        background: var(--vscode-editor-background);
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        z-index: 1500;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .legend-header {
+        padding: 4px 8px;
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .legend-header:hover {
+        background: var(--vscode-list-hoverBackground);
+    }
+    .legend-toggle {
+        font-size: 12px;
+        font-weight: bold;
+    }
+    .legend-content {
+        padding: 4px 8px;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+        font-size: 9px;
+    }
+    .legend-item:last-child {
+        margin-bottom: 0;
+    }
+    .legend-line {
+        width: 20px;
+        height: 2px;
+        border-radius: 1px;
+    }
+    .legend-line-entry {
+        background: #4CAF50;
+    }
+    .legend-line-exit {
+        background: #2196F3;
+    }
+    .legend-line-critical {
+        background: #FF6B6B;
     }
     #minimap {
         position: fixed;

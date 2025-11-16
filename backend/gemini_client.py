@@ -12,7 +12,7 @@ class GeminiClient:
                 'temperature': 0.0,  # Deterministic output
                 'top_p': 1.0,
                 'top_k': 1,
-                'max_output_tokens': 8192,  # Set explicit output limit
+                'max_output_tokens': 65536,  # Flash also supports 65536
             }
         )
 
@@ -41,6 +41,7 @@ class GeminiClient:
         prompt = f"""You are a workflow analyzer. Analyze this code and create a complete workflow graph showing how data flows through the AI/LLM system.
 
 NOTE: Code may contain multiple files marked with "# File: path". Analyze them together as one cohesive workflow.
+IMPORTANT: Large codebases may include non-LLM files (auth, config, utils). Focus ONLY on files that contain or call LLM APIs.
 
 {metadata_str}
 
@@ -87,39 +88,47 @@ IMPORTANT: Every workflow needs AT LEAST these nodes:
 - Output processing steps (if any)
 - 1 output node (where does data exit?)
 
-NODE TYPES (label = 2-4 words max, description = 1-2 sentences):
+NODE TYPES (label = 2-4 words max, description = 1-2 brief sentences):
 1. **trigger**: Entry points - API endpoints, main functions, event handlers, user input
    - Label examples: "API Endpoint", "Main Entry", "Webhook"
    - Description examples: "Receives analysis requests via POST /analyze endpoint", "Main function that initializes the workflow"
+   - Keep descriptions concise but informative
 
 2. **llm**: LLM API calls
    - Look for: .chat.completions.create, .messages.create, .generate_content
    - Label examples: "GPT-4 Call", "Claude Analysis", "Gemini Request"
    - Description examples: "Calls GPT-4 with temperature 0.7 to analyze code", "Sends prompt to Claude for structured analysis"
+   - Keep descriptions concise but informative
 
 3. **tool**: Functions/tools available to or called by LLM
    - Label examples: "Search Tool", "Calculator", "Query DB"
    - Description examples: "Searches documentation using vector similarity", "Tool available to LLM for mathematical calculations"
+   - Keep descriptions concise but informative
 
 4. **decision**: Conditional logic based on LLM output or input
    - Label examples: "Route by Intent", "Check Confidence", "Validate Output"
    - Description examples: "Routes request based on detected user intent", "Validates LLM response confidence score before proceeding"
+   - Keep descriptions concise but informative
 
 5. **integration**: External API calls, database operations, third-party services
    - Label examples: "Slack API", "Database Insert", "HTTP Request"
    - Description examples: "Posts formatted message to Slack channel", "Stores conversation history in PostgreSQL database"
+   - Keep descriptions concise but informative
 
 6. **memory**: State storage, conversation history, caching
    - Label examples: "Store Messages", "Session Cache", "History"
    - Description examples: "Caches conversation history in Redis with 1 hour TTL", "Maintains session state across requests"
+   - Keep descriptions concise but informative
 
 7. **parser**: Data transformation, parsing, formatting
    - Label examples: "Parse JSON", "Format Prompt", "Extract Fields"
    - Description examples: "Parses LLM JSON response and validates schema", "Formats user input and context into final prompt"
+   - Keep descriptions concise but informative
 
 8. **output**: Where results go - returns, responses, saves
    - Label examples: "Return Response", "HTTP Response", "Save File"
    - Description examples: "Returns formatted JSON response to client", "Writes analysis results to output file"
+   - Keep descriptions concise but informative
 
 WORKFLOW CONSTRUCTION RULES:
 - ALWAYS start with a trigger node (entry point)
@@ -151,9 +160,10 @@ EDGE LABELS (CRITICAL - EVERY EDGE MUST HAVE):
    - Python: "str", "dict", "list", "AnalyzeRequest", "WorkflowGraph"
    - JavaScript: "string", "object", "array", "Request", "Response"
    - If unknown, use "any" or omit
-3. "description": What the variable represents (1 sentence)
+3. "description": What the variable represents (brief, 1 sentence max)
    - Example: "User request containing code to analyze"
    - Example: "Parsed JSON workflow graph from LLM"
+   - Keep brief but informative
 4. "sourceLocation": Where variable is passed (file/line/function)
    - Use source node's location if variable is output
    - Use target node's location if variable is input
@@ -187,23 +197,98 @@ DETECT LLM PROVIDERS:
 
 LABEL AND DESCRIPTION REQUIREMENTS (CRITICAL):
 - "label": Must be 2-4 words maximum (e.g., "GPT-4 Call", "Format Request", "API Endpoint")
-- "description": REQUIRED - Must be 1-2 complete sentences explaining what the node does in detail
+- "description": REQUIRED - 1-2 brief sentences explaining what the node does
 - EVERY node MUST have a description - NO EXCEPTIONS
-- Keep labels SHORT and concise - they will be displayed in the graph visualization
-- Use descriptions for detailed explanations - they appear in popups when nodes are clicked
+- Keep labels SHORT (2-4 words) - they will be displayed in the graph visualization
+- Keep descriptions CONCISE but informative (1-2 sentences) - they appear in popups when nodes are clicked
 - Description examples: "Receives analysis requests via POST /analyze endpoint", "Calls Gemini 2.5 Flash to analyze code"
+- IMPORTANT: Be brief but clear - avoid verbose or overly detailed descriptions
 
 CRITICAL PATH ANALYSIS (EXECUTION TIME):
-Identify the LONGEST execution path (time-wise) from entry to exit. This is the critical path.
+Identify the LONGEST execution path (time-wise) from ONE entry point to ONE exit point. This is the critical path.
+
+Entry/Exit detection (MUST DO FIRST):
+  * Entry nodes have NO incoming edges (first operations in workflow)
+  * Exit nodes have NO outgoing edges (final operations in workflow)
+  * Mark with "isEntryPoint": true or "isExitPoint": true
+
+CRITICAL PATH RULES (STRICT - MUST ENFORCE):
+1. The critical path MUST START at an entry point node (isEntryPoint: true)
+2. The critical path MUST END at an exit point node (isExitPoint: true)
+3. The path MUST be SINGULAR and LINEAR - NO BRANCHING allowed
+4. If there's branching (e.g., if-else), choose ONLY the slowest branch
+5. The path structure: Entry Node → Intermediate → ... → Exit Node (full traversal)
+6. At each node, select ONLY ONE outgoing edge (the slowest next step)
+7. Mark BOTH nodes and edges on this singular path with "isCriticalPath": true
+8. All other paths (even if slow) should NOT be marked as critical
+
+Execution time considerations:
 - Consider: LLM API calls (slowest), network requests, file I/O, database queries
 - Look for: Large prompts (more tokens = longer), waits, loops, external dependencies
-- Mark BOTH nodes and edges on this path with "isCriticalPath": true
-- Entry/Exit detection:
-  * Entry nodes have NO incoming edges (first operations)
-  * Exit nodes have NO outgoing edges (final operations)
-  * Mark with "isEntryPoint": true or "isExitPoint": true
 - Example slow operations: LLM calls (1-5 sec), API requests (100-500ms), large file reads
 - Example fast operations: variable assignments, simple parsing, function calls
+
+VALIDATION STEPS (PERFORM BEFORE FINALIZING):
+1. Find the first node in critical path - verify it has "isEntryPoint": true
+2. Find the last node in critical path - verify it has "isExitPoint": true
+3. Trace the path - it should form ONE continuous line with NO forks
+4. If path doesn't start at entry or end at exit, you MUST fix it
+
+WORKFLOW IDENTIFICATION (CRITICAL):
+Identify and name logical workflow groupings based on semantic purpose. Each workflow represents a cohesive unit of functionality.
+
+WORKFLOW NAMING RULES:
+1. Analyze the PURPOSE of each connected component (what business goal does it serve?)
+2. Create descriptive names that reflect the workflow's function (2-6 words)
+3. Every workflow MUST have a unique, meaningful name (NO generic names)
+4. Include what the workflow DOES, not just what it contains
+
+WORKFLOW EXAMPLES:
+- "User Authentication Flow" (login, validation, token generation)
+- "Document Analysis Pipeline" (upload, parsing, LLM analysis, storage)
+- "Multi-Agent Research Workflow" (query, agent orchestration, synthesis)
+- "RAG Query Processing" (retrieval, context building, LLM generation)
+- "API Request Handler" (validation, processing, response formatting)
+- "Data Extraction Pipeline" (fetch, transform, validate, store)
+
+WORKFLOW DETECTION:
+1. Start from entry points (trigger nodes)
+2. Follow execution flow through connected nodes
+3. Identify logical boundaries (where one workflow ends, another begins)
+4. Group nodes that serve the same high-level purpose
+5. CRITICAL: Each workflow MUST contain at least 1 LLM call node (type: "llm")
+
+WORKFLOW GROUPING RULES:
+- ONLY create workflows that include LLM API calls (workflows without LLM nodes will be ignored)
+- If code has clear separation (different endpoints, distinct flows): Create separate workflows
+- If nodes work together for one goal: Group into single workflow
+- Minimum: 1 workflow with LLM nodes
+- Nodes NOT connected to any LLM workflow should be excluded from the graph entirely
+
+WORKFLOW CONNECTIVITY VALIDATION (CRITICAL - MUST ENFORCE):
+Every workflow MUST form a fully connected graph with NO orphaned or disconnected nodes.
+
+CONNECTIVITY RULES:
+1. EVERY node in a workflow MUST be reachable from an entry point through edges
+2. EVERY node (except entry points) MUST have at least ONE incoming edge from another node IN THE SAME WORKFLOW
+3. EVERY node (except exit points) MUST have at least ONE outgoing edge to another node IN THE SAME WORKFLOW
+4. NO orphaned nodes - if a node has no edges connecting it to other workflow nodes, DO NOT include it in that workflow
+5. NO isolated clusters - all nodes in a workflow must form ONE connected component
+
+VALIDATION STEPS (PERFORM BEFORE FINALIZING):
+1. Start at each entry point (nodes with no incoming edges)
+2. Trace forward through ALL edges - can you reach every node in the workflow?
+3. If any node is unreachable, either:
+   a) Add the missing edge that connects it, OR
+   b) Remove it from the workflow entirely
+4. Verify: Every non-entry node has incoming edge(s), every non-exit node has outgoing edge(s)
+5. The final workflow should be a fully connected tree or DAG (directed acyclic graph)
+
+WORKFLOW DESCRIPTION:
+- 1-2 brief sentences explaining what the workflow accomplishes
+- Include key operations and final outcome
+- Keep concise but informative
+- Example: "Processes user queries by retrieving relevant documents from vector store, building context, and generating responses using GPT-4."
 
 Code to analyze:
 {code}
@@ -231,6 +316,9 @@ Return ONLY valid JSON (NOTE: source locations MUST be different for each node):
     {{"source": "node3", "target": "node4", "label": "result", "dataType": "str", "description": "Raw JSON response text from Gemini", "sourceLocation": {{"file": "/backend/gemini_client.py", "line": 172, "function": "analyze_workflow"}}, "isCriticalPath": true}},
     {{"source": "node4", "target": "node5", "label": "graph_data", "dataType": "WorkflowGraph", "description": "Parsed and validated workflow graph object", "sourceLocation": {{"file": "/backend/main.py", "line": 85, "function": "analyze_workflow"}}, "isCriticalPath": true}}
   ],
+  "workflows": [
+    {{"id": "workflow_1", "name": "Code Analysis Pipeline", "description": "Receives code via API endpoint, analyzes it using Gemini LLM to extract workflow structure, and returns the parsed graph to the client.", "nodeIds": ["node1", "node2", "node3", "node4", "node5"]}}
+  ],
   "llms_detected": ["OpenAI"]
 }}
 
@@ -238,6 +326,9 @@ VALIDATION BEFORE RETURNING:
 - Check EVERY "source" field is an object (not a string like "[3]")
 - Check EVERY "sourceLocation" field is an object (not a string)
 - Check all required fields: file, line, function
+- Check "workflows" array exists and has at least 1 workflow
+- Check every workflow has: id, name (descriptive!), description, nodeIds
+- Check all nodes are included in at least one workflow (no orphans)
 
 NO markdown, NO explanation, ONLY JSON."""
 
@@ -246,6 +337,17 @@ NO markdown, NO explanation, ONLY JSON."""
         for attempt in range(max_retries):
             try:
                 response = self.model.generate_content(prompt)
+
+                # Check if response was blocked or incomplete
+                if hasattr(response, 'candidates') and response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                    if finish_reason == 2:  # MAX_TOKENS
+                        raise Exception("Output exceeded token limit. Try reducing batch size or simplifying the code.")
+                    elif finish_reason == 3:  # SAFETY
+                        raise Exception("Response blocked by safety filters. The code may contain sensitive content.")
+                    elif finish_reason not in [0, 1]:  # Not UNSPECIFIED or STOP
+                        raise Exception(f"Generation failed with finish_reason: {finish_reason}")
+
                 return response.text
             except Exception as e:
                 error_str = str(e)
