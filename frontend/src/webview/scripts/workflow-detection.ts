@@ -223,6 +223,8 @@ export const workflowDetectionScript = `
                         });
                     });
                 });
+                // Sort workflows alphabetically by name
+                groups.sort((a, b) => a.name.localeCompare(b.name));
                 return groups;
             }
 
@@ -320,6 +322,8 @@ export const workflowDetectionScript = `
 
             // Don't render orphan nodes - only nodes in LLM workflows should be displayed
 
+            // Sort workflows alphabetically by name
+            groups.sort((a, b) => a.name.localeCompare(b.name));
             return groups;
         }
 

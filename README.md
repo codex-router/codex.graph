@@ -170,6 +170,18 @@ python main.py  # Runs on http://localhost:8000
 3. Add detection logic to `backend/gemini_client.py` → "DETECT LLM PROVIDERS" section
 4. Run `cd frontend && npm run compile`
 
+## Known Limitations
+
+### Export Functionality (Temporarily Removed)
+
+Export buttons (SVG, PNG, Markdown) were removed in commit `2750e0d`. To restore:
+
+```bash
+git revert 2750e0d  # Or cherry-pick specific export functionality
+```
+
+The export feature will be re-implemented with improved UX in a future update.
+
 ## Future Enhancements
 
 ### Consider Migrating to Dagre Compound Graphs

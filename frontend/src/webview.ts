@@ -86,8 +86,6 @@ export class WebviewManager {
                     }
                 } else if (message.command === 'refreshAnalysis') {
                     vscode.commands.executeCommand('codag.refresh');
-                } else if (message.command === 'exportFile') {
-                    this.handleExport(message);
                 } else if (message.command === 'nodeSelected') {
                     this.updateViewState({
                         selectedNodeId: message.nodeId,
@@ -120,7 +118,7 @@ export class WebviewManager {
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel(
                 'codag',
-                'Codag',
+                'LLM Architecture',
                 vscode.ViewColumn.Beside,
                 {
                     enableScripts: true,
@@ -174,44 +172,6 @@ export class WebviewManager {
         }
     }
 
-    private async handleExport(message: { format: string; data: string; filename: string }) {
-        const filters: { [key: string]: string[] } = {
-            svg: ['SVG Files'],
-            png: ['PNG Images'],
-            md: ['Markdown Files']
-        };
-
-        const extensions: { [key: string]: string[] } = {
-            svg: ['svg'],
-            png: ['png'],
-            md: ['md']
-        };
-
-        const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(message.filename),
-            filters: { [filters[message.format]?.[0] || 'All Files']: extensions[message.format] || ['*'] }
-        });
-
-        if (uri) {
-            try {
-                let content: Uint8Array;
-
-                if (message.format === 'png') {
-                    // PNG is base64 encoded
-                    const base64Data = message.data.replace(/^data:image\/png;base64,/, '');
-                    content = Buffer.from(base64Data, 'base64');
-                } else {
-                    // SVG and MD are plain text
-                    content = Buffer.from(message.data, 'utf-8');
-                }
-
-                await vscode.workspace.fs.writeFile(uri, content);
-                vscode.window.showInformationMessage(`Exported to ${uri.fsPath}`);
-            } catch (error: any) {
-                vscode.window.showErrorMessage(`Export failed: ${error.message}`);
-            }
-        }
-    }
 
     focusNode(nodeId: string) {
         if (this.panel) {
@@ -228,7 +188,7 @@ export class WebviewManager {
         } else {
             this.panel = vscode.window.createWebviewPanel(
                 'codag',
-                'Codag',
+                'LLM Architecture',
                 vscode.ViewColumn.Beside,
                 {
                     enableScripts: true,
@@ -427,7 +387,7 @@ export class WebviewManager {
             dagreGraph.setGraph({
                 rankdir: 'LR',      // Left to right
                 nodesep: 50,        // Vertical spacing between nodes in same rank
-                ranksep: 100,       // Horizontal spacing between ranks
+                ranksep: 60,        // Horizontal spacing between ranks
                 marginx: 30,        // Left/right margins
                 marginy: 30         // Top/bottom margins
             });
@@ -741,7 +701,7 @@ export class WebviewManager {
                 const linkElement = d3.select(edgePathsContainer.node().children[index]).select('.link');
 
                 if (d.isCriticalPath) {
-                    linkElement.style('stroke', '#FF9999').style('stroke-width', '5px');
+                    linkElement.style('stroke', '#FF9999').style('stroke-width', '3px');
                 } else {
                     linkElement.style('stroke', '#00d9ff').style('stroke-width', '3px');
                 }
@@ -785,7 +745,7 @@ export class WebviewManager {
                 const linkElement = d3.select(edgePathsContainer.node().children[index]).select('.link');
 
                 if (d.isCriticalPath) {
-                    linkElement.style('stroke', '#FF6B6B').style('stroke-width', '4px');
+                    linkElement.style('stroke', '#FF6B6B').style('stroke-width', '2px');
                 } else {
                     linkElement.style('stroke', null).style('stroke-width', null);
                 }
@@ -1432,7 +1392,7 @@ export class WebviewManager {
 
         // Attach tooltip listeners to all control buttons
         document.querySelectorAll('#controls button').forEach((btn, index) => {
-            const tooltips = ['Zoom In', 'Zoom Out', 'Fit to Screen', 'Expand/Collapse All Workflows', 'Reset Layout', 'Reanalyze Entire Workspace', 'Export as SVG', 'Export as PNG', 'Export as Markdown'];
+            const tooltips = ['Zoom In', 'Zoom Out', 'Fit to Screen', 'Expand/Collapse All Workflows', 'Reset Layout', 'Reanalyze Entire Workspace'];
             btn.addEventListener('mouseenter', (e) => showButtonTooltip(e, tooltips[index]));
             btn.addEventListener('mousemove', (e) => {
                 const tooltip = document.getElementById('buttonTooltip');
@@ -1616,10 +1576,14 @@ export class WebviewManager {
                 // Get current transform
                 const currentTransform = d3.zoomTransform(svg.node());
 
+                // Get current viewport dimensions (fresh values for proper centering)
+                const currentWidth = container.clientWidth;
+                const currentHeight = container.clientHeight;
+
                 // Calculate new translation to center on clicked point
                 const newTranslate = [
-                    width / 2 - currentTransform.k * graphX,
-                    height / 2 - currentTransform.k * graphY
+                    currentWidth / 2 - currentTransform.k * graphX,
+                    currentHeight / 2 - currentTransform.k * graphY
                 ];
 
                 // Apply new transform
@@ -2102,7 +2066,7 @@ export class WebviewManager {
                 if (existingPositionedNodes.length === 0) {
                     // ALL nodes are new - run full dagre layout for this workflow
                     const dagreGraph = new dagre.graphlib.Graph();
-                    dagreGraph.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 100 });
+                    dagreGraph.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 60 });
                     dagreGraph.setDefaultEdgeLabel(() => ({}));
 
                     // Add all workflow nodes
@@ -2143,7 +2107,7 @@ export class WebviewManager {
                 } else if (workflow.bounds) {
                     // Workflow has existing positioned nodes - use mini-dagre to insert new nodes
                     const dagreGraph = new dagre.graphlib.Graph();
-                    dagreGraph.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 100 });
+                    dagreGraph.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 60 });
                     dagreGraph.setDefaultEdgeLabel(() => ({}));
 
                     // Add all workflow nodes (existing ones get fixed positions)
@@ -2185,7 +2149,7 @@ export class WebviewManager {
                     // Workflow exists but has no bounds yet and no positioned nodes
                     // Run full dagre layout
                     const dagreGraph = new dagre.graphlib.Graph();
-                    dagreGraph.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 100 });
+                    dagreGraph.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 60 });
                     dagreGraph.setDefaultEdgeLabel(() => ({}));
 
                     workflow.nodes.forEach(nodeId => {

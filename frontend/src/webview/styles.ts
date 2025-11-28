@@ -56,6 +56,7 @@ export const webviewStyles = `
     #controls {
         display: flex;
         gap: 4px;
+        margin-left: auto;
     }
     #controls button {
         background: transparent;
@@ -172,7 +173,7 @@ export const webviewStyles = `
     .node-icon.parser { color: #A1887F; }
     .node-icon.output { color: #90A4AE; }
     .node text {
-        fill: var(--vscode-editor-foreground);
+        fill: #ffffff;
         font-size: 11px;
         pointer-events: none;
         user-select: none;
@@ -181,7 +182,7 @@ export const webviewStyles = `
     .node-title {
         font-size: 13px;
         font-weight: 600;
-        fill: var(--vscode-editor-foreground);
+        fill: #ffffff;
     }
     .node-type {
         font-size: 9px;
@@ -197,7 +198,7 @@ export const webviewStyles = `
         transition: stroke 0.2s ease, stroke-width 0.2s ease;
     }
     .link.critical-path {
-        stroke-width: 4px;
+        stroke-width: 2px;
         stroke-opacity: 1;
         stroke: #FF6B6B;
     }
@@ -538,5 +539,12 @@ export const webviewStyles = `
     }
     .collapsed-group-node:hover text {
         opacity: 1 !important;
+    }
+
+    /* Responsive: Hide stats on narrow viewports */
+    @media (max-width: 639px) {
+        .snapshot-stats {
+            display: none;
+        }
     }
 `;
