@@ -16,24 +16,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "codag.login",
-        "title": "Codag: Login"
-      },
-      {
-        "command": "codag.register",
-        "title": "Codag: Register"
-      },
-      {
-        "command": "codag.logout",
-        "title": "Codag: Logout"
-      },
-      {
-        "command": "codag.visualize",
-        "title": "Codag: Visualize Current File"
-      },
-      {
-        "command": "codag.visualizeWorkspace",
-        "title": "Codag: Auto-detect and Visualize"
+        "command": "codag.open",
+        "title": "Codag: Open"
       }
     ],
     "configuration": {

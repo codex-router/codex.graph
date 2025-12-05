@@ -11,6 +11,7 @@ import { registerWorkflowQueryTool } from './copilot/workflow-query-tool';
 import { registerNodeQueryTool } from './copilot/node-query-tool';
 import { registerWorkflowNavigateTool } from './copilot/workflow-navigate-tool';
 import { CONFIG } from './config';
+import { buildFileTree, saveFilePickerSelection, updateLLMStatus, getSavedSelectedPaths } from './file-picker';
 
 const outputChannel = vscode.window.createOutputChannel('Codag');
 
@@ -299,24 +300,20 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Register command to focus on a specific workflow (for clickable links from Copilot)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('codag.focusWorkflow', (workflowName: string) => {
+            log(`Focusing on workflow: ${workflowName}`);
+            webview.focusWorkflow(workflowName);
+        })
+    );
+
     log('Extension activated successfully');
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codag.login', () => auth.login())
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codag.register', () => auth.register())
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codag.logout', () => auth.logout())
-    );
 
     async function analyzeCurrentFile(bypassCache: boolean = false) {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            vscode.window.showWarningMessage('No active file');
+            webview.notifyWarning('No active file. Open a file to analyze.');
             return;
         }
 
@@ -327,7 +324,7 @@ export function activate(context: vscode.ExtensionContext) {
         log(`Visualizing file: ${filePath}${bypassCache ? ' (bypassing cache)' : ''}`);
 
         if (!WorkflowDetector.isWorkflowFile(document.uri)) {
-            vscode.window.showWarningMessage('File type not supported');
+            webview.notifyWarning('File type not supported. Open a Python or TypeScript file.');
             log(`File type not supported: ${filePath}`);
             return;
         }
@@ -341,7 +338,6 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             if (!graph) {
-                vscode.window.showInformationMessage('Analyzing workflow...');
                 webview.notifyAnalysisStarted();
 
                 // Track analysis start time
@@ -393,15 +389,8 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             webview.notifyAnalysisComplete(false, errorMsg);
-            vscode.window.showErrorMessage(`Analysis failed: ${errorMsg}`);
         }
     }
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codag.visualize', async () => {
-            await analyzeCurrentFile(false);
-        })
-    );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('codag.refresh', async () => {
@@ -423,22 +412,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     async function analyzeWorkspace(bypassCache: boolean = false) {
-        // TODO: Re-enable auth when ready
-        // if (!auth.isAuthenticated()) {
-        //     vscode.window.showWarningMessage('Please login first');
-        //     return;
-        // }
-
-        // Show notification with timeout (5 seconds)
-        vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: 'Scanning workspace for AI workflows...',
-            cancellable: false
-        }, async (progress) => {
-            // Keep notification visible for 5 seconds
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        });
-
         // Track analysis start time
         const startTime = Date.now();
 
@@ -450,23 +423,20 @@ export function activate(context: vscode.ExtensionContext) {
 
         try {
             const workflowFiles = await WorkflowDetector.detectInWorkspace();
-            log(`Found ${workflowFiles.length} workflow files:`);
+            log(`Found ${workflowFiles.length} workflow files`);
 
             if (workflowFiles.length === 0) {
-                vscode.window.showInformationMessage('No AI workflow files found in workspace');
+                webview.notifyWarning('No AI workflow files found. Open a file with LLM API calls.');
                 return;
             }
 
-            // Read all workflow files
-            const fileContents: { path: string; content: string; }[] = [];
+            // Read ALL workflow files first to check cache
+            const allFileContents: { path: string; content: string; }[] = [];
             for (const uri of workflowFiles) {
-                const relativePath = vscode.workspace.asRelativePath(uri);
-                log(`  - ${relativePath}`);
-
                 try {
                     const content = await vscode.workspace.fs.readFile(uri);
                     const text = Buffer.from(content).toString('utf8');
-                    fileContents.push({
+                    allFileContents.push({
                         path: uri.fsPath,
                         content: text
                     });
@@ -475,15 +445,178 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
 
+            // Check cache for ALL files before showing file picker
+            let allCachedGraphs: any[] = [];
+            if (!bypassCache) {
+                log(`\nChecking cache for all ${allFileContents.length} files...`);
+                try {
+                    const allPaths = allFileContents.map(f => f.path);
+                    const allContents = allFileContents.map(f => f.content);
+                    const cacheResult = await cache.getMultiplePerFile(allPaths, allContents);
+                    allCachedGraphs = cacheResult.cachedGraphs;
+                    if (allCachedGraphs.length > 0) {
+                        log(`✓ Found ${allCachedGraphs.length} cached graphs`);
+                    }
+                } catch (cacheError: any) {
+                    log(`⚠️  Cache check failed: ${cacheError.message}`);
+                }
+            }
+
+            // Check if this is a subsequent run (has cached data)
+            const isFirstRun = allCachedGraphs.length === 0;
+
+            if (!isFirstRun) {
+                // SUBSEQUENT RUN: Silent background analysis
+                const savedSelection = getSavedSelectedPaths(context);
+
+                if (savedSelection.length > 0) {
+                    log(`\nSubsequent run detected - performing silent background analysis`);
+                    log(`Using ${savedSelection.length} previously selected files`);
+
+                    // Filter to previously selected files that are still workflow files
+                    const selectedFiles = workflowFiles.filter(f => savedSelection.includes(f.fsPath));
+                    const fileContents = allFileContents.filter(f => savedSelection.includes(f.path));
+
+                    if (fileContents.length === 0) {
+                        log(`No selected files found in current workflow files, showing picker`);
+                    } else {
+                        // Check cache for selected files
+                        const cacheResult = await cache.getMultiplePerFile(
+                            fileContents.map(f => f.path),
+                            fileContents.map(f => f.content)
+                        );
+
+                        const uncachedCount = cacheResult.uncachedFiles.length;
+                        const cachedGraphs = cacheResult.cachedGraphs;
+                        const newGraphs: any[] = [];
+
+                        if (uncachedCount === 0) {
+                            // All files up to date - show cached graph
+                            log(`✓ All ${fileContents.length} files up to date`);
+                            const mergedGraph = cache.mergeGraphs(cachedGraphs);
+                            webview.show(mergedGraph);
+                            return;
+                        }
+
+                        // Analyze changed files in background
+                        log(`Found ${uncachedCount} files needing analysis`);
+
+                        // Show cached graph immediately while analyzing
+                        if (cachedGraphs.length > 0) {
+                            const cachedGraph = cache.mergeGraphs(cachedGraphs);
+                            webview.show(cachedGraph, { loading: true });
+                        } else {
+                            webview.showLoading(`Analyzing ${uncachedCount} file${uncachedCount !== 1 ? 's' : ''}...`);
+                        }
+
+                        const filesToAnalyze = cacheResult.uncachedFiles;
+                        const uncachedUris = filesToAnalyze.map(f => vscode.Uri.file(f.path));
+                        const metadata = await metadataBuilder.buildMetadata(uncachedUris);
+
+                        // Detect framework
+                        let framework: string | null = null;
+                        for (const file of filesToAnalyze) {
+                            framework = WorkflowDetector.detectFramework(file.content);
+                            if (framework) break;
+                        }
+
+                        // Analyze files
+                        try {
+                            const combinedCode = filesToAnalyze.map(f =>
+                                `# File: ${f.path}\n${f.content}`
+                            ).join('\n\n');
+
+                            const graph = await api.analyzeWorkflow(
+                                combinedCode,
+                                filesToAnalyze.map(f => f.path),
+                                framework || undefined,
+                                metadata
+                            );
+
+                            newGraphs.push(graph);
+
+                            // Cache results per file
+                            for (const file of filesToAnalyze) {
+                                const fileNodes = graph.nodes.filter((n: any) => n.source?.file === file.path);
+                                const fileNodeIds = new Set(fileNodes.map((n: any) => n.id));
+                                const fileEdges = graph.edges.filter((e: any) =>
+                                    fileNodeIds.has(e.source) && fileNodeIds.has(e.target)
+                                );
+
+                                const isolatedGraph = {
+                                    nodes: fileNodes,
+                                    edges: fileEdges,
+                                    llms_detected: graph.llms_detected || [],
+                                    workflows: graph.workflows || []
+                                };
+
+                                await cache.setPerFile(file.path, file.content, isolatedGraph);
+                            }
+
+                            log(`✓ Analysis complete: ${graph.nodes.length} nodes`);
+                        } catch (error: any) {
+                            log(`Analysis failed: ${error.message}`);
+                            webview.notifyAnalysisComplete(false, error.message);
+                            return;
+                        }
+
+                        // Show merged graph (cached + new)
+                        const mergedGraph = cache.mergeGraphs([...cachedGraphs, ...newGraphs]);
+                        webview.show(mergedGraph);
+
+                        return;
+                    }
+                }
+            }
+
+            // FIRST RUN: Show file picker
+            // If we have cached graphs, show them BEFORE the file picker
+            if (allCachedGraphs.length > 0) {
+                const cachedGraph = cache.mergeGraphs(allCachedGraphs);
+                webview.show(cachedGraph);
+                log(`✓ Displayed ${allCachedGraphs.length} cached graphs behind file picker`);
+            }
+
+            // Get ALL source files for the picker (shows all files, not just LLM)
+            const allSourceFiles = await WorkflowDetector.getAllSourceFiles();
+
+            // Build file tree with all source files
+            const { tree, totalFiles } = buildFileTree(allSourceFiles, context);
+
+            // Show file picker immediately
+            const pickerPromise = webview.showFilePicker(tree, totalFiles);
+
+            // Update picker with LLM file selection (workflowFiles already detected)
+            webview.updateFilePickerLLM(workflowFiles.map(f => f.fsPath));
+
+            const selectedPaths = await pickerPromise;
+            if (!selectedPaths || selectedPaths.length === 0) {
+                webview.notifyWarning('No files selected for analysis.');
+                return;
+            }
+
+            // Save selection to cache
+            await saveFilePickerSelection(context, allSourceFiles, selectedPaths);
+
+            // Filter to selected files only
+            const selectedFiles = workflowFiles.filter(f => selectedPaths.includes(f.fsPath));
+            const fileContents = allFileContents.filter(f => selectedPaths.includes(f.path));
+
+            log(`User selected ${selectedFiles.length} of ${workflowFiles.length} files for analysis`);
+            for (const f of fileContents) {
+                const relativePath = vscode.workspace.asRelativePath(f.path);
+                log(`  - ${relativePath}`);
+            }
+
             const allPaths = fileContents.map(f => f.path);
             const allContents = fileContents.map(f => f.content);
 
-            // Check per-file cache FIRST (unless bypassing)
+            // Check per-file cache for SELECTED files (unless bypassing)
             let cachedGraphs: any[] = [];
             let filesToAnalyze = fileContents;
 
             if (!bypassCache) {
-                log(`\nChecking per-file cache for ${workflowFiles.length} files...`);
+                log(`\nChecking per-file cache for ${selectedFiles.length} selected files...`);
                 try {
                     const cacheResult = await cache.getMultiplePerFile(allPaths, allContents);
                     cachedGraphs = cacheResult.cachedGraphs;
@@ -503,19 +636,14 @@ export function activate(context: vscode.ExtensionContext) {
                     console.warn('Cache check error:', cacheError);
                 }
             } else {
-                log(`\nBypassing cache, analyzing all ${workflowFiles.length} files`);
+                log(`\nBypassing cache, analyzing all ${selectedFiles.length} files`);
             }
 
-            // Show initial state with loading indicator if we have uncached files
-            const hasUncachedFiles = filesToAnalyze.length > 0;
+            // Show cached graphs for selected files (closes file picker and displays)
             if (cachedGraphs.length > 0) {
                 const cachedGraph = cache.mergeGraphs(cachedGraphs);
-                webview.show(cachedGraph, hasUncachedFiles ? { loading: true, progress: { current: 0, total: 1 } } : undefined);
+                webview.initGraph(cachedGraph);
                 log(`✓ Displayed ${cachedGraphs.length} cached graphs (${cachedGraph.nodes.length} nodes, ${cachedGraph.edges.length} edges)`);
-            } else {
-                // No cache, show empty graph with loading indicator
-                const emptyGraph = { nodes: [], edges: [], llms_detected: [], workflows: [] };
-                webview.show(emptyGraph, hasUncachedFiles ? { loading: true, progress: { current: 0, total: 1 } } : undefined);
             }
 
             // Store newly analyzed graphs
@@ -642,7 +770,6 @@ export function activate(context: vscode.ExtensionContext) {
                             const sizeKb = Math.round(f.content.length / 1024);
                             log(`  - ${relativePath} (${sizeKb} KB)`);
                         });
-                        vscode.window.showInformationMessage(`Analyzing batch ${batchIndex + 1}/${totalBatches}...`);
 
                         try {
                             // Combine batch files for analysis
@@ -669,9 +796,8 @@ export function activate(context: vscode.ExtensionContext) {
                         } catch (batchError: any) {
                             // Check if it's a file size error (HTTP 413)
                             if (batchError.response?.status === 413) {
-                                const sizeErrorMsg = `Batch ${batchIndex + 1} failed: ${batchError.response?.data?.detail || batchError.message}`;
+                                const sizeErrorMsg = `Batch ${batchIndex + 1}: Files too large. Try analyzing fewer files.`;
                                 log(sizeErrorMsg);
-                                vscode.window.showErrorMessage(sizeErrorMsg, { modal: false });
                                 // Don't fallback for size errors - skip this batch
                                 return null;
                             }
@@ -751,10 +877,25 @@ export function activate(context: vscode.ExtensionContext) {
             const graph = cache.mergeGraphs([...cachedGraphs, ...newGraphs]);
             log(`\n✓ Final graph: ${cachedGraphs.length} cached + ${newGraphs.length} new = ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
 
+            // Update file selection cache with which files actually have LLM calls
+            const analyzedFilePaths = selectedFiles.map(f => f.fsPath);
+            const filesWithLLMCalls = new Set<string>();
+            for (const node of graph.nodes) {
+                if (node.source?.file) {
+                    // Convert relative path to absolute if needed
+                    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                    if (workspaceRoot) {
+                        const absolutePath = node.source.file.startsWith('/')
+                            ? node.source.file
+                            : vscode.Uri.file(workspaceRoot + '/' + node.source.file).fsPath;
+                        filesWithLLMCalls.add(absolutePath);
+                    }
+                }
+            }
+            await updateLLMStatus(context, analyzedFilePaths, Array.from(filesWithLLMCalls));
+
             if (graph.nodes.length === 0 && graph.edges.length === 0) {
-                vscode.window.showWarningMessage(
-                    'No workflows detected. Files may have been rejected by the LLM or contain no LLM usage.'
-                );
+                webview.notifyWarning('No workflows detected. Check your files use supported LLM APIs.');
                 log('⚠️  Final graph is empty - all files rejected or contain no LLM usage');
             }
 
@@ -775,12 +916,9 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Handle file size errors (HTTP 413) with clearer messaging
             if (error.response?.status === 413) {
-                const sizeErrorMsg = `Analysis failed: ${errorMsg}\n\nTip: Try analyzing fewer files at once or reduce batch size in settings.`;
-                webview.notifyAnalysisComplete(false, sizeErrorMsg);
-                vscode.window.showErrorMessage(sizeErrorMsg, { modal: false });
+                webview.notifyAnalysisComplete(false, 'Files too large. Try analyzing fewer files.');
             } else {
                 webview.notifyAnalysisComplete(false, errorMsg);
-                vscode.window.showErrorMessage(`Workspace scan failed: ${errorMsg}`);
             }
         }
     }
@@ -835,8 +973,109 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('codag.visualizeWorkspace', async () => {
+        vscode.commands.registerCommand('codag.open', async () => {
             await analyzeWorkspace(false);
+        })
+    );
+
+    // Show file picker without re-rendering graph (used from within webview)
+    context.subscriptions.push(
+        vscode.commands.registerCommand('codag.showFilePicker', async () => {
+            log('Opening file picker (preserving current graph)...');
+
+            // Fast: get all source files without LLM analysis
+            const allFiles = await WorkflowDetector.getAllSourceFiles();
+            if (allFiles.length === 0) {
+                webview.notifyWarning('No source files found.');
+                return;
+            }
+
+            // Build file tree and show picker immediately
+            const { tree, totalFiles } = buildFileTree(allFiles, context);
+            const pickerPromise = webview.showFilePicker(tree, totalFiles);
+
+            // Background: detect LLM files and update picker with badges
+            WorkflowDetector.detectInWorkspace().then(llmFiles => {
+                webview.updateFilePickerLLM(llmFiles.map(f => f.fsPath));
+            });
+
+            const selectedPaths = await pickerPromise;
+
+            if (!selectedPaths || selectedPaths.length === 0) {
+                return; // User cancelled
+            }
+
+            // Save selection and trigger analysis for selected files
+            await saveFilePickerSelection(context, allFiles, selectedPaths);
+
+            // Read selected files
+            const fileContents: { path: string; content: string; }[] = [];
+            for (const filePath of selectedPaths) {
+                try {
+                    const uri = vscode.Uri.file(filePath);
+                    const content = await vscode.workspace.fs.readFile(uri);
+                    fileContents.push({ path: filePath, content: Buffer.from(content).toString('utf8') });
+                } catch (error) {
+                    log(`⚠️  Skipping file (read error): ${filePath}`);
+                }
+            }
+
+            // Check cache
+            const allPaths = fileContents.map(f => f.path);
+            const allContents = fileContents.map(f => f.content);
+            const cacheResult = await cache.getMultiplePerFile(allPaths, allContents);
+
+            if (cacheResult.cachedGraphs.length > 0) {
+                const cachedGraph = cache.mergeGraphs(cacheResult.cachedGraphs);
+                webview.initGraph(cachedGraph);
+            }
+
+            // If there are uncached files, analyze them
+            if (cacheResult.uncachedFiles.length > 0) {
+                log(`Analyzing ${cacheResult.uncachedFiles.length} uncached files...`);
+                webview.notifyAnalysisStarted();
+
+                const uncachedUris = cacheResult.uncachedFiles.map(f => vscode.Uri.file(f.path));
+                const metadata = await metadataBuilder.buildMetadata(uncachedUris);
+
+                let framework: string | null = null;
+                for (const file of cacheResult.uncachedFiles) {
+                    framework = WorkflowDetector.detectFramework(file.content);
+                    if (framework) break;
+                }
+
+                const combinedCode = cacheResult.uncachedFiles.map(f =>
+                    `# File: ${f.path}\n${f.content}`
+                ).join('\n\n');
+
+                const newGraph = await api.analyzeWorkflow(
+                    combinedCode,
+                    cacheResult.uncachedFiles.map(f => f.path),
+                    framework || undefined,
+                    metadata
+                );
+
+                // Cache new results
+                for (const file of cacheResult.uncachedFiles) {
+                    const fileNodes = newGraph.nodes.filter((n: any) => n.source?.file === file.path);
+                    const fileNodeIds = new Set(fileNodes.map((n: any) => n.id));
+                    const fileEdges = newGraph.edges.filter((e: any) =>
+                        fileNodeIds.has(e.source) && fileNodeIds.has(e.target)
+                    );
+                    await cache.setPerFile(file.path, file.content, {
+                        nodes: fileNodes,
+                        edges: fileEdges,
+                        llms_detected: newGraph.llms_detected || [],
+                        workflows: newGraph.workflows || []
+                    });
+                }
+
+                // Merge all graphs
+                const allGraphs = [...cacheResult.cachedGraphs, newGraph];
+                const mergedGraph = cache.mergeGraphs(allGraphs);
+                webview.updateGraph(mergedGraph);
+                webview.notifyAnalysisComplete(true);
+            }
         })
     );
 }

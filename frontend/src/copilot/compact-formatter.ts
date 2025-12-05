@@ -26,6 +26,14 @@ export function createNodeLink(nodeId: string, label: string): string {
 }
 
 /**
+ * Create clickable workflow link for Copilot (zooms to workflow)
+ */
+export function createWorkflowLink(workflowName: string): string {
+  const commandUri = `command:codag.focusWorkflow?${encodeURIComponent(JSON.stringify([workflowName]))}`;
+  return `[${workflowName}](${commandUri})`;
+}
+
+/**
  * Format a single node in compact format
  * Output: ⚡ [Label](cmd:...) → file:line
  */
@@ -85,7 +93,8 @@ export function formatWorkflow(
   edges: WorkflowEdge[],
   graph: WorkflowGraph
 ): string {
-  const lines: string[] = [`━━━ ${workflowName} ━━━`];
+  const workflowLink = createWorkflowLink(workflowName);
+  const lines: string[] = [`━━━ ${workflowLink} ━━━`];
 
   // Build adjacency map
   const children = new Map<string, string[]>();
@@ -177,6 +186,22 @@ export function formatWorkflows(
   });
 
   return parts.join('\n');
+}
+
+/**
+ * Format workflows as compact clickable list (just names, no tree structure)
+ */
+export function formatWorkflowsCompact(
+  workflows: Array<{ name: string; nodeIds: string[] }>
+): string {
+  if (workflows.length === 0) return '';
+
+  const lines = ['Workflows:'];
+  workflows.forEach(wf => {
+    const link = createWorkflowLink(wf.name);
+    lines.push(`• ${link} (${wf.nodeIds.length} nodes)`);
+  });
+  return lines.join('\n');
 }
 
 /**

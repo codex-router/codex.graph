@@ -9,7 +9,10 @@ import { renderEdges } from './edges';
 import { renderNodes } from './nodes';
 import { dragstarted, dragged, dragended } from './drag';
 import { renderMinimap } from './minimap';
+import { fitToScreen } from './controls';
 import { updateGroupVisibility } from './visibility';
+import { populateDirectory, focusOnWorkflow } from './directory';
+import { getFilePicker } from './file-picker';
 
 declare const d3: any;
 
@@ -84,6 +87,16 @@ export function setupMessageHandler(): void {
                         indicator.style.display = 'none';
                     }, 3000);
                 }
+                break;
+
+            case 'warning':
+                indicator.className = 'loading-indicator warning';
+                iconSpan.textContent = '⚠';
+                textSpan.textContent = message.message || 'Warning';
+                indicator.style.display = 'block';
+                setTimeout(() => {
+                    indicator.style.display = 'none';
+                }, 4000);
                 break;
 
             case 'updateGraph':
@@ -204,6 +217,90 @@ export function setupMessageHandler(): void {
                                 .call(zoom.transform, transform);
                         }
                     }
+                }
+                break;
+
+            case 'focusWorkflow':
+                if (message.workflowName) {
+                    focusOnWorkflow(message.workflowName);
+                }
+                break;
+
+            case 'showFilePicker':
+                if (message.tree && message.totalFiles !== undefined) {
+                    const filePicker = getFilePicker();
+                    filePicker.show({
+                        tree: message.tree,
+                        totalFiles: message.totalFiles
+                    }).then((selectedPaths) => {
+                        // Send result back to extension
+                        state.vscode.postMessage({
+                            command: 'filePickerResult',
+                            selectedPaths: selectedPaths
+                        });
+                    });
+                }
+                break;
+
+            case 'updateFilePickerLLM':
+                if (message.llmFiles) {
+                    getFilePicker().updateLLMFiles(message.llmFiles);
+                }
+                break;
+
+            case 'initGraph':
+                // Close file picker if open (no animation - show graph immediately)
+                getFilePicker().close(false);
+
+                if (message.graph) {
+                    console.log('[webview] initGraph: initializing with cached data');
+
+                    // Ensure visual cues on new data
+                    ensureVisualCues(message.graph);
+
+                    // Update graph data
+                    state.setGraphData(message.graph);
+
+                    // Detect workflow groups
+                    const groups = detectWorkflowGroups(message.graph);
+                    state.setWorkflowGroups(groups);
+
+                    // Clear all graph elements
+                    state.g.selectAll('.groups, .collapsed-groups, .nodes-container, .edge-paths-container').remove();
+
+                    // Get defs from svg
+                    const defs = svg.select('defs');
+
+                    // Run layout
+                    layoutWorkflows(defs);
+
+                    // Render everything
+                    renderGroups(updateGroupVisibility);
+                    renderEdges();
+                    renderNodes(dragstarted, dragged, dragended);
+                    renderCollapsedGroups(updateGroupVisibility);
+
+                    // Render minimap
+                    renderMinimap();
+
+                    // Fit to screen
+                    fitToScreen();
+
+                    // Apply group visibility
+                    updateGroupVisibility();
+
+                    // Update header stats
+                    updateSnapshotStats(state.workflowGroups, state.currentGraphData);
+
+                    // Show success indicator
+                    indicator.className = 'loading-indicator success';
+                    iconSpan.textContent = '✓';
+                    textSpan.textContent = 'Loaded from cache';
+                    indicator.style.display = 'block';
+                    setTimeout(() => {
+                        indicator.classList.add('hidden');
+                        setTimeout(() => indicator.style.display = 'none', 300);
+                    }, 2000);
                 }
                 break;
         }

@@ -13,6 +13,7 @@ import { setupClosePanel, closePanel } from './panel';
 import { setupMessageHandler } from './messages';
 import { updateGroupVisibility } from './visibility';
 import { ensureVisualCues, detectWorkflowGroups, updateSnapshotStats } from './workflow-detection';
+import { setupDirectory } from './directory';
 
 declare const d3: any;
 declare function acquireVsCodeApi(): any;
@@ -62,6 +63,7 @@ declare function acquireVsCodeApi(): any;
     // Setup controls (zoom, expand/collapse, format, refresh)
     setupControls(updateGroupVisibility);
     setupClosePanel();
+    setupDirectory();
 
     // Setup message handler
     setupMessageHandler();
@@ -83,7 +85,7 @@ declare function acquireVsCodeApi(): any;
         formatGraph(updateGroupVisibility);
         renderMinimap();
         fitToScreen();
-        // Apply initial group collapse states
+        // Apply initial group collapse states (also populates directory)
         updateGroupVisibility();
         // Update header stats
         updateSnapshotStats(state.workflowGroups, state.currentGraphData);

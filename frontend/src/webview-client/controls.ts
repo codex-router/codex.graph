@@ -3,6 +3,7 @@ import * as state from './state';
 import { getNodeWorkflowCount, generateEdgePath, getNodeOrCollapsedGroup } from './utils';
 import { renderMinimap } from './minimap';
 import { getNodeDimensions, positionTooltipNearMouse } from './helpers';
+import { measureTextWidth } from './groups';
 import {
     NODE_WIDTH, NODE_HEIGHT, NODE_HALF_WIDTH,
     COLLAPSED_GROUP_HALF_WIDTH, COLLAPSED_GROUP_HALF_HEIGHT,
@@ -21,16 +22,16 @@ export function setupControls(updateGroupVisibility: () => void): void {
     document.getElementById('btn-fit-screen')?.addEventListener('click', () => fitToScreen());
     document.getElementById('btn-expand-all')?.addEventListener('click', () => toggleExpandAll(updateGroupVisibility));
     document.getElementById('btn-format')?.addEventListener('click', () => formatGraph(updateGroupVisibility));
-    document.getElementById('btn-refresh')?.addEventListener('click', refreshAnalysis);
+    document.getElementById('btn-analyze')?.addEventListener('click', openAnalyzePanel);
     document.getElementById('legend-header')?.addEventListener('click', toggleLegend);
 
     // Setup button tooltips
     setupButtonTooltips();
 }
 
-function refreshAnalysis(): void {
-    console.log('refreshAnalysis button clicked');
-    state.vscode.postMessage({ command: 'refreshAnalysis' });
+function openAnalyzePanel(): void {
+    console.log('openAnalyzePanel button clicked');
+    state.vscode.postMessage({ command: 'openAnalyzePanel' });
 }
 
 function toggleExpandAll(updateGroupVisibility: () => void): void {
@@ -74,7 +75,7 @@ function zoomOut(): void {
 }
 
 function setupButtonTooltips(): void {
-    const tooltips = ['Zoom In', 'Zoom Out', 'Fit to Screen', 'Expand/Collapse All Workflows', 'Reset Layout', 'Reanalyze Entire Workspace'];
+    const tooltips = ['Zoom In', 'Zoom Out', 'Fit to Screen', 'Expand/Collapse All Workflows', 'Reset Layout', 'Analyze Files'];
 
     document.querySelectorAll('#controls button').forEach((btn, index) => {
         btn.addEventListener('mouseenter', (e) => showButtonTooltip(e as MouseEvent, tooltips[index]));
@@ -170,6 +171,16 @@ export function formatGraph(updateGroupVisibility: () => void): void {
             minY: Math.min(...ys) - GROUP_BOUNDS_PADDING_TOP,
             maxY: Math.max(...ys) + GROUP_BOUNDS_PADDING_BOTTOM
         };
+
+        // Expand bounds to fit title if needed
+        const fontFamily = '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif';
+        const titleText = `${group.name} (${group.nodes.length} nodes)`;
+        const titleWidth = measureTextWidth(titleText, '19px', '500', fontFamily);
+        const requiredWidth = titleWidth + GROUP_TITLE_OFFSET_X + 40;
+        const currentWidth = group.bounds.maxX - group.bounds.minX;
+        if (requiredWidth > currentWidth) {
+            group.bounds.maxX = group.bounds.minX + requiredWidth;
+        }
 
         group.centerX = (group.bounds.minX + group.bounds.maxX) / 2;
         group.centerY = (group.bounds.minY + group.bounds.maxY) / 2;

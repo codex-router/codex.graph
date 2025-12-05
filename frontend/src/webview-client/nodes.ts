@@ -48,29 +48,24 @@ export function renderNodes(
         .style('fill', 'var(--vscode-editor-background)')
         .style('stroke', 'none');
 
-    // Add colored body background (bottom 92px, rounded bottom corners)
+    // Add grey body background (bottom 92px, rounded bottom corners)
     node.append('path')
         .attr('class', 'node-body')
         .attr('d', 'M -70,-31 L 70,-31 L 70,57 A 4,4 0 0,1 66,61 L -66,61 A 4,4 0 0,1 -70,57 Z')
-        .style('fill', (d: any) => TYPE_COLORS[d.type] || '#90A4AE')
-        .style('opacity', 0.5)
+        .style('fill', 'color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-editor-foreground))')
         .style('stroke', 'none');
 
-    // Add rectangular border with entry/exit/critical classes
+    // Add type-colored border
     node.append('rect')
+        .attr('class', 'node-border')
         .attr('width', NODE_WIDTH)
         .attr('height', NODE_HEIGHT)
         .attr('x', -NODE_HALF_WIDTH)
         .attr('y', -NODE_HALF_HEIGHT)
         .attr('rx', NODE_BORDER_RADIUS)
-        .attr('class', (d: any) => {
-            const classes: string[] = [];
-            if (d.isCriticalPath) classes.push('critical-path');
-            if (d.isEntryPoint) classes.push('entry-point');
-            if (d.isExitPoint) classes.push('exit-point');
-            return classes.join(' ');
-        })
         .style('fill', 'none')
+        .style('stroke', (d: any) => TYPE_COLORS[d.type] || '#90A4AE')
+        .style('stroke-width', '2px')
         .style('pointer-events', 'all');
 
     // Add title centered in body with text wrapping
@@ -89,8 +84,8 @@ export function renderNodes(
         .style('align-items', 'center')
         .style('justify-content', 'center')
         .style('text-align', 'center')
-        .style('color', '#ffffff')
-        .style('font-family', '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif')
+        .style('color', 'var(--vscode-editor-foreground)')
+        .style('font-family', '"DM Sans", "Inter", "Segoe UI", -apple-system, sans-serif')
         .style('font-size', '17px')
         .style('font-weight', '400')
         .style('letter-spacing', '-0.01em')
@@ -113,6 +108,20 @@ export function renderNodes(
         .attr('y', -43)
         .attr('dominant-baseline', 'middle')
         .style('text-anchor', 'start');
+
+    // Add entry icon (top-right, green door with arrow in)
+    node.filter((d: any) => d.isEntryPoint)
+        .append('g')
+        .attr('class', 'entry-icon')
+        .attr('transform', 'translate(52, -52) scale(0.7)')
+        .html('<svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13.8 12H3" stroke="#4CAF50" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+
+    // Add exit icon (top-right, red door with arrow out)
+    node.filter((d: any) => d.isExitPoint)
+        .append('g')
+        .attr('class', 'exit-icon')
+        .attr('transform', (d: any) => d.isEntryPoint ? 'translate(32, -52) scale(0.7)' : 'translate(52, -52) scale(0.7)')
+        .html('<svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="#f44336" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
 
     // Add selection indicator (camera corners)
     const cornerSize = 8;

@@ -218,6 +218,14 @@ LABEL AND DESCRIPTION REQUIREMENTS (CRITICAL):
 CRITICAL PATH ANALYSIS (EXECUTION TIME):
 Identify the LONGEST execution path (time-wise) from ONE entry point to ONE exit point. This is the critical path.
 
+CRITICAL PATH DEFINITION - What is a "path"?
+A path is a CONNECTED sequence of edges where:
+- Edge 1 starts at the entry node
+- Each edge's TARGET node equals the NEXT edge's SOURCE node (edges chain together)
+- The final edge ends at the exit node
+- Example: A→B, B→C, C→D forms a valid path from A to D (B connects to B, C connects to C)
+- Example: A→B, C→D is NOT a valid path (B≠C, the edges don't connect!)
+
 Entry/Exit detection (MUST DO FIRST - CHECK ALL EDGES):
   * Entry nodes have ZERO incoming edges from ANY node in the ENTIRE graph
   * Exit nodes have ZERO outgoing edges to ANY node in the ENTIRE graph
@@ -228,12 +236,13 @@ Entry/Exit detection (MUST DO FIRST - CHECK ALL EDGES):
 CRITICAL PATH RULES (STRICT - MUST ENFORCE):
 1. The critical path MUST START at an entry point node (isEntryPoint: true)
 2. The critical path MUST END at an exit point node (isExitPoint: true)
-3. The path MUST be SINGULAR and LINEAR - NO BRANCHING allowed
-4. If there's branching (e.g., if-else), choose ONLY the slowest branch
-5. The path structure: Entry Node → Intermediate → ... → Exit Node (full traversal)
-6. At each node, select ONLY ONE outgoing edge (the slowest next step)
-7. Mark BOTH nodes and edges on this singular path with "isCriticalPath": true
-8. All other paths (even if slow) should NOT be marked as critical
+3. The path MUST be CONNECTED - each edge's target = next edge's source
+4. The path MUST be SINGULAR and LINEAR - NO BRANCHING allowed
+5. If there's branching (e.g., if-else), choose ONLY the slowest branch
+6. The path structure: Entry Node → Intermediate → ... → Exit Node (full traversal)
+7. At each node, select ONLY ONE outgoing edge (the slowest next step)
+8. Mark BOTH nodes and edges on this singular path with "isCriticalPath": true
+9. All other paths (even if slow) should NOT be marked as critical
 
 Execution time considerations:
 - Consider: LLM API calls (slowest), network requests, file I/O, database queries
@@ -244,9 +253,10 @@ Execution time considerations:
 VALIDATION STEPS (PERFORM BEFORE FINALIZING):
 1. Find the first node in critical path - verify it has "isEntryPoint": true
 2. Find the last node in critical path - verify it has "isExitPoint": true
-3. Trace the path - it should form ONE continuous line with NO forks
-4. If path doesn't start at entry or end at exit, you MUST fix it
-5. EDGE SOURCE LOCATIONS: Verify each edge's sourceLocation follows data flow logic:
+3. Verify CONNECTIVITY: For each consecutive pair of critical edges, edge[i].target === edge[i+1].source
+4. Trace the path - it should form ONE continuous line with NO forks or gaps
+5. If edges don't chain together (disconnected), it's NOT a valid path - FIX IT
+6. EDGE SOURCE LOCATIONS: Verify each edge's sourceLocation follows data flow logic:
    - Incoming edge (data entering node): sourceLocation points to where data is CREATED (in source node)
    - Outgoing edge (data leaving node): sourceLocation points to where data is USED (in target node)
    - This enables developers to trace actual data flow through the codebase

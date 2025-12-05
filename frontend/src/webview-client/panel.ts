@@ -4,7 +4,7 @@ import * as state from './state';
 declare const d3: any;
 
 export function openPanel(nodeData: any): void {
-    const { vscode, currentGraphData } = state;
+    const { vscode, currentGraphData, workflowGroups } = state;
 
     const panel = document.getElementById('sidePanel');
     const title = document.getElementById('panelTitle');
@@ -23,6 +23,21 @@ export function openPanel(nodeData: any): void {
     }
 
     title.textContent = nodeData.label;
+
+    // Set workflow name
+    const workflowEl = document.getElementById('panelWorkflow');
+    if (workflowEl) {
+        const workflow = workflowGroups?.find(
+            (g: any) => g.nodes.includes(nodeData.id)
+        );
+        if (workflow) {
+            workflowEl.textContent = workflow.name;
+            workflowEl.style.display = 'block';
+        } else {
+            workflowEl.style.display = 'none';
+        }
+    }
+
     type.textContent = nodeData.type;
     type.className = `type-badge ${nodeData.type}`;
 
@@ -62,7 +77,7 @@ export function openPanel(nodeData: any): void {
             return `<div style="margin: 8px 0; padding: 8px; background: var(--vscode-input-background); border-radius: 4px;">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
                     ${edge.sourceLocation ? `<a href="#" class="source-link incoming-data-link" data-file="${edge.sourceLocation.file}" data-line="${edge.sourceLocation.line}"><strong>${edge.label}</strong></a>` : `<strong>${edge.label}</strong>`}
-                    ${edge.dataType ? `<span style="font-size: 10px; padding: 2px 6px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border-radius: 3px;">${edge.dataType}</span>` : ''}
+                    ${edge.dataType ? `<span style="font-size: 10px; padding: 2px 6px; background: color-mix(in srgb, var(--vscode-editor-background) 85%, var(--vscode-editor-foreground)); color: var(--vscode-editor-foreground); border-radius: 3px;">${edge.dataType}</span>` : ''}
                 </div>
                 <div style="font-size: 11px; color: var(--vscode-descriptionForeground);">From: ${sourceNode ? sourceNode.label : edge.source}</div>
                 ${edge.description ? `<div style="font-size: 11px; margin-top: 4px; font-style: italic;">${edge.description}</div>` : ''}
@@ -101,7 +116,7 @@ export function openPanel(nodeData: any): void {
             return `<div style="margin: 8px 0; padding: 8px; background: var(--vscode-input-background); border-radius: 4px;">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
                     ${edge.sourceLocation ? `<a href="#" class="source-link outgoing-data-link" data-file="${edge.sourceLocation.file}" data-line="${edge.sourceLocation.line}"><strong>${edge.label}</strong></a>` : `<strong>${edge.label}</strong>`}
-                    ${edge.dataType ? `<span style="font-size: 10px; padding: 2px 6px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border-radius: 3px;">${edge.dataType}</span>` : ''}
+                    ${edge.dataType ? `<span style="font-size: 10px; padding: 2px 6px; background: color-mix(in srgb, var(--vscode-editor-background) 85%, var(--vscode-editor-foreground)); color: var(--vscode-editor-foreground); border-radius: 3px;">${edge.dataType}</span>` : ''}
                 </div>
                 <div style="font-size: 11px; color: var(--vscode-descriptionForeground);">To: ${targetNode ? targetNode.label : edge.target}</div>
                 ${edge.description ? `<div style="font-size: 11px; margin-top: 4px; font-style: italic;">${edge.description}</div>` : ''}

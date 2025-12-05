@@ -19,7 +19,7 @@ run:
 	@echo "Starting backend..."
 	@cd backend && . venv/bin/activate && \
 		python main.py > ../backend.log 2>&1 & echo $$! > ../backend.pid && \
-		echo "Backend running (PID: $$!)"
+		echo "Backend running on port 8000 (PID: $$!)"
 	@sleep 2
 	@echo "Launching VSCode extension..."
 	@code --extensionDevelopmentPath=$(PWD)/frontend $(PWD)

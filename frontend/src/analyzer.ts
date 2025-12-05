@@ -334,6 +334,30 @@ export class WorkflowDetector {
         return allWorkflowFiles;
     }
 
+    /**
+     * Get all source files without analyzing content (fast).
+     * Used to show file picker immediately.
+     */
+    static async getAllSourceFiles(): Promise<vscode.Uri[]> {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders) return [];
+
+        const files: vscode.Uri[] = [];
+        const excludePattern = await this.buildExcludePattern(workspaceFolders[0].uri);
+
+        for (const ext of this.FILE_EXTENSIONS) {
+            const found = await vscode.workspace.findFiles(
+                `**/*${ext}`,
+                excludePattern,
+                10000
+            );
+            files.push(...found);
+        }
+
+        files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+        return files;
+    }
+
     static detectWorkflow(content: string, filePath?: string): boolean {
         // Two-pass detection: AST-based (accurate) → Direct LLM patterns (fallback)
 

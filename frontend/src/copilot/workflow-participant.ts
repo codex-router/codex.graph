@@ -10,7 +10,7 @@ import { WorkflowMetadataProvider } from './metadata-provider';
 import { ViewState, WorkflowMetadata } from './types';
 import { CodeModifier } from './code-modifier';
 import { filterOrphanedNodes } from './graph-filter';
-import { TYPE_SYMBOLS, createNodeLink, formatWorkflows, formatLegend, linkifyResponse } from './compact-formatter';
+import { TYPE_SYMBOLS, createNodeLink, formatWorkflowsCompact, formatLegend } from './compact-formatter';
 
 export function registerWorkflowParticipant(
   context: vscode.ExtensionContext,
@@ -125,11 +125,10 @@ export function registerWorkflowParticipant(
 NODE TYPES: ⚡trigger 🧠llm 🔧tool ◇decision 🔌integration 💾memory ⚙️parser ✓output
 
 RESPONSE FORMAT:
-- For "show nodes" or "what's visible": Use COMPACT format - symbol + name only, grouped by workflow
-- Example format: "**Workflow X:** ⚡Entry → 🧠LLM Call → ✓Output"
-- NO descriptions unless user specifically asks "describe" or "explain"
-- Keep listings under 15 lines - summarize if more
-- Node names in context are clickable links
+- When asked about workflows: Use clickable workflow names from context - DON'T list individual nodes
+- Only show individual nodes if user specifically asks for node details
+- Keep responses concise - workflow links are already clickable and will zoom to that workflow
+- Workflow and node names in context are clickable links that zoom to their location
 
 FOR CODE CHANGES:
 - Say "I can prepare the exact changes" then show the diff/snippet
@@ -147,15 +146,12 @@ ${contextStr}`;
 
       const chatResponse = await request.model.sendRequest(messages, {}, token);
 
-      // Collect full response
+      // Stream response to user immediately (don't wait for full response)
       let fullResponse = '';
       for await (const fragment of chatResponse.text) {
+        stream.markdown(fragment);
         fullResponse += fragment;
       }
-
-      // Post-process to convert node names to clickable links
-      const linkedResponse = linkifyResponse(fullResponse, filteredGraph);
-      stream.markdown(linkedResponse);
 
       // Check if the response contains code modifications
       await detectAndApplyCodeModifications(fullResponse, graph, viewState, codeModifier, stream);
@@ -208,9 +204,9 @@ function formatMetadata(
     }
   }
 
-  // Visible workflows in compact tree format
+  // Workflows as clickable links (not verbose tree structure)
   if (metadata.workflows.length > 0) {
-    parts.push(formatWorkflows(metadata.workflows, graph));
+    parts.push(formatWorkflowsCompact(metadata.workflows));
   }
 
   // All nodes list (compact)

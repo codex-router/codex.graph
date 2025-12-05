@@ -380,4 +380,23 @@ export class CacheManager {
         await this.initPromise;
         return Object.values(this.perFileCache).map(entry => entry.graph);
     }
+
+    /**
+     * Get all cached file paths (absolute paths)
+     */
+    async getCachedFilePaths(): Promise<string[]> {
+        await this.initPromise;
+
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            return [];
+        }
+
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+        return Object.values(this.perFileCache).map(entry =>
+            path.isAbsolute(entry.filePath)
+                ? entry.filePath
+                : path.join(workspaceRoot, entry.filePath)
+        );
+    }
 }

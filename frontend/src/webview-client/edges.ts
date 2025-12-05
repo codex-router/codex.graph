@@ -65,7 +65,7 @@ export function renderEdges(): void {
         .attr('class', (d: any) => d.isCriticalPath ? 'link critical-path' : 'link')
         .style('stroke-width', `${EDGE_STROKE_WIDTH}px`)
         .style('pointer-events', 'none')
-        .attr('marker-end', 'url(#arrowhead)')
+        .attr('marker-end', (d: any) => d.isCriticalPath ? 'url(#arrowhead-critical)' : 'url(#arrowhead)')
         .attr('marker-start', (d: any) => d.isBidirectional ? 'url(#arrowhead-start)' : null);
 
     // Add invisible wider path for easier hovering
@@ -171,7 +171,10 @@ function showEdgeTooltip(d: any, event: any): void {
 }
 
 function formatEdgeInfo(edge: any, header?: string): string {
-    let html = '';
+    let html = '<div style="position: relative;">';
+    if (edge.isCriticalPath) {
+        html += `<span style="position: absolute; top: 0; right: 0; background: ${CRITICAL_PATH_COLOR}; color: white; font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 3px;">HOT PATH</span>`;
+    }
     if (header) {
         html += `<div style="font-weight: 600; margin-bottom: 4px; color: var(--vscode-textLink-foreground);">${header}</div>`;
     }
@@ -181,6 +184,7 @@ function formatEdgeInfo(edge: any, header?: string): string {
     if (edge.sourceLocation) {
         html += `<div><strong>Location:</strong> ${edge.sourceLocation.file.split('/').pop()}:${edge.sourceLocation.line}</div>`;
     }
+    html += '</div>';
     return html;
 }
 

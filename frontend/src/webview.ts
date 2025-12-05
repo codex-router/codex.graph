@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WorkflowGraph } from './api';
 import { ViewState } from './copilot/types';
+import { FileTreeNode } from './file-picker';
 
 export interface LoadingOptions {
     loading?: boolean;
@@ -16,6 +17,7 @@ export class WebviewManager {
         expandedWorkflowIds: [],
         lastUpdated: Date.now()
     };
+    private filePickerResolver: ((paths: string[] | null) => void) | null = null;
 
     constructor(private context: vscode.ExtensionContext) {}
 
@@ -50,6 +52,15 @@ export class WebviewManager {
                 command: 'analysisComplete',
                 success,
                 error
+            });
+        }
+    }
+
+    notifyWarning(message: string) {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'warning',
+                message
             });
         }
     }
@@ -106,11 +117,85 @@ export class WebviewManager {
                     this.updateViewState({
                         visibleNodeIds: message.visibleNodeIds || []
                     });
+                } else if (message.command === 'filePickerResult') {
+                    // Handle file picker result from webview
+                    if (this.filePickerResolver) {
+                        this.filePickerResolver(message.selectedPaths);
+                        this.filePickerResolver = null;
+                    }
+                } else if (message.command === 'openAnalyzePanel') {
+                    // Just show the file picker on the existing graph
+                    vscode.commands.executeCommand('codag.showFilePicker');
+                } else if (message.command === 'clearCacheAndReanalyze') {
+                    // Clear cache and trigger full reanalysis
+                    vscode.commands.executeCommand('codag.refresh');
                 }
             },
             undefined,
             this.context.subscriptions
         );
+    }
+
+    /**
+     * Show file picker in webview and wait for user selection
+     */
+    async showFilePicker(tree: FileTreeNode, totalFiles: number): Promise<string[] | null> {
+        // Ensure panel is created
+        if (!this.panel) {
+            this.panel = vscode.window.createWebviewPanel(
+                'codag',
+                'LLM Architecture',
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: true,
+                    retainContextWhenHidden: true,
+                    localResourceRoots: [
+                        vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                        vscode.Uri.joinPath(this.context.extensionUri, 'out')
+                    ]
+                }
+            );
+
+            this.panel.iconPath = this.getIconPath();
+
+            this.panel.onDidDispose(() => {
+                this.panel = undefined;
+                // If file picker was open, resolve with null
+                if (this.filePickerResolver) {
+                    this.filePickerResolver(null);
+                    this.filePickerResolver = null;
+                }
+            });
+
+            this.setupMessageHandlers();
+
+            // Show empty graph initially
+            this.panel.webview.html = this.getHtml({ nodes: [], edges: [], llms_detected: [], workflows: [] });
+        } else {
+            this.panel.reveal();
+        }
+
+        // Send file picker message to webview
+        this.panel.webview.postMessage({
+            command: 'showFilePicker',
+            tree,
+            totalFiles
+        });
+
+        // Wait for result
+        return new Promise((resolve) => {
+            this.filePickerResolver = resolve;
+        });
+    }
+
+    /**
+     * Update file picker with LLM detection results (called after picker is shown)
+     */
+    updateFilePickerLLM(llmFilePaths: string[]) {
+        this.panel?.webview.postMessage({
+            command: 'updateFilePickerLLM',
+            llmFiles: llmFilePaths
+        });
     }
 
     showLoading(message: string) {
@@ -161,6 +246,18 @@ export class WebviewManager {
         }
     }
 
+    /**
+     * Initialize graph after file picker closes (for cached data)
+     */
+    initGraph(graph: WorkflowGraph) {
+        if (this.panel) {
+            this.panel.webview.postMessage({
+                command: 'initGraph',
+                graph
+            });
+        }
+    }
+
     showProgressOverlay(message: string) {
         if (this.panel) {
             this.panel.webview.postMessage({ command: 'showProgressOverlay', text: message });
@@ -177,6 +274,13 @@ export class WebviewManager {
         if (this.panel) {
             this.panel.reveal();
             this.panel.webview.postMessage({ command: 'focusNode', nodeId });
+        }
+    }
+
+    focusWorkflow(workflowName: string) {
+        if (this.panel) {
+            this.panel.reveal();
+            this.panel.webview.postMessage({ command: 'focusWorkflow', workflowName });
         }
     }
 

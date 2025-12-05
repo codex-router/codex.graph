@@ -2,6 +2,7 @@
 import * as state from './state';
 import { generateEdgePath, getNodeOrCollapsedGroup } from './utils';
 import { getNodeDimensions, areNodesInSameCollapsedGroup } from './helpers';
+import { populateDirectory } from './directory';
 
 declare const d3: any;
 
@@ -94,4 +95,7 @@ export function updateGroupVisibility(): void {
         command: 'workflowVisibilityChanged',
         expandedWorkflowIds: expandedWorkflowIds
     });
+
+    // Update workflow directory
+    populateDirectory();
 }

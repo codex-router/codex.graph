@@ -1,3 +1,11 @@
+@font-face {
+    font-family: 'Hack Nerd Font Mono';
+    src: url('https://cdn.jsdelivr.net/gh/ryanoasis/nerd-fonts@v3.1.1/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -90,12 +98,12 @@ body {
     background: rgba(33, 150, 243, 0.1);
     border-color: #2196F3;
 }
-#controls button.refresh-btn {
-    color: #f44336;
+#controls button.analyze-btn {
+    color: #4CAF50;
 }
-#controls button.refresh-btn:hover {
-    background: rgba(244, 67, 54, 0.1);
-    border-color: #f44336;
+#controls button.analyze-btn:hover {
+    background: rgba(76, 175, 80, 0.1);
+    border-color: #4CAF50;
 }
 .controls-divider {
     width: 1px;
@@ -137,33 +145,16 @@ body {
 }
 .node rect {
     fill: var(--vscode-editor-background);
-    stroke: #ffffff;
+    stroke: var(--vscode-editor-foreground);
     stroke-width: 2px;
     opacity: 1;
     pointer-events: all;
     cursor: pointer;
     transition: stroke-width 0.2s ease, fill 0.2s ease, stroke 0.2s ease, rx 0.2s ease, ry 0.2s ease;
 }
-.node:hover rect:not(.node-header) {
-    stroke-width: 4px;
-    fill: var(--vscode-list-hoverBackground);
-    stroke: #00d9ff;
-    rx: 8;
-    ry: 8;
-}
-.node:hover rect.entry-point {
-    stroke: #66BB6A !important;
-    stroke-width: 4px !important;
-    fill: var(--vscode-list-hoverBackground);
-    rx: 8;
-    ry: 8;
-}
-.node:hover rect.exit-point {
-    stroke: #42A5F5 !important;
-    stroke-width: 4px !important;
-    fill: var(--vscode-list-hoverBackground);
-    rx: 8;
-    ry: 8;
+.node:hover .node-border {
+    stroke-width: 3px;
+    filter: brightness(1.3);
 }
 .node-icon {
     pointer-events: none;
@@ -178,7 +169,7 @@ body {
 .node-icon.parser { color: #A1887F; }
 .node-icon.output { color: #90A4AE; }
 .node text {
-    fill: #ffffff;
+    fill: var(--vscode-editor-foreground);
     font-size: 11px;
     pointer-events: none;
     user-select: none;
@@ -187,7 +178,7 @@ body {
 .node-title {
     font-size: 14px;
     font-weight: 400;
-    fill: #ffffff;
+    fill: var(--vscode-editor-foreground);
 }
 .node-type {
     font-size: 9px;
@@ -208,17 +199,12 @@ body {
     stroke-opacity: 1;
     stroke: #FF6B6B;
 }
-.node rect.entry-point {
-    stroke: #4CAF50 !important;
-    stroke-width: 3px !important;
-}
-.node rect.exit-point {
-    stroke: #2196F3 !important;
-    stroke-width: 3px !important;
+.entry-icon, .exit-icon {
+    pointer-events: none;
 }
 .node-selection-indicator {
     stroke: var(--vscode-textLink-foreground);
-    stroke-width: 3px;
+    stroke-width: 5px;
     fill: none;
     pointer-events: none;
     stroke-linecap: round;
@@ -255,6 +241,18 @@ body {
 }
 .button-tooltip.visible {
     opacity: 1;
+}
+@media (max-width: 900px) {
+    .edge-tooltip { font-size: 11px; padding: 7px; max-width: 260px; }
+    .button-tooltip { font-size: 10px; padding: 3px 7px; }
+}
+@media (max-width: 700px) {
+    .edge-tooltip { font-size: 10px; padding: 6px; max-width: 220px; }
+    .button-tooltip { font-size: 9px; padding: 3px 6px; }
+}
+@media (max-width: 500px) {
+    .edge-tooltip { font-size: 9px; padding: 5px; max-width: 180px; }
+    .button-tooltip { font-size: 8px; padding: 2px 5px; }
 }
 .loading-indicator {
     position: fixed;
@@ -307,6 +305,13 @@ body {
 }
 .loading-indicator.error .loading-icon,
 .loading-indicator.error .loading-icon .spinner-pill {
+    animation: none;
+}
+.loading-indicator.warning {
+    border-color: #ff9800;
+}
+.loading-indicator.warning .loading-icon,
+.loading-indicator.warning .loading-icon .spinner-pill {
     animation: none;
 }
 @keyframes spin {
@@ -376,17 +381,32 @@ body {
     right: 0;
 }
 .panel-header {
-    padding: 16px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--vscode-panel-border);
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+.panel-header-left {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
 }
 .panel-header h2 {
     font-size: 14px;
     font-weight: 600;
     margin: 0;
     color: var(--vscode-foreground);
+}
+.panel-workflow {
+    font-size: 11px;
+    font-weight: 400;
+    margin: 2px 0 0 0;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .close-btn {
     background: transparent;
@@ -443,69 +463,13 @@ body {
     font-family: var(--vscode-editor-font-family);
     display: block;
     padding: 6px;
-    background: var(--vscode-editor-inactiveSelectionBackground);
+    background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-editor-foreground));
     border-radius: 3px;
     word-break: break-all;
 }
 .source-link:hover {
     text-decoration: underline;
     background: var(--vscode-list-hoverBackground);
-}
-.legend {
-    position: fixed;
-    bottom: 174px;
-    left: 16px;
-    width: 200px;
-    background: var(--vscode-editor-background);
-    border: 1px solid var(--vscode-panel-border);
-    border-radius: 4px;
-    z-index: 1500;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-.legend-header {
-    padding: 4px 8px;
-    cursor: pointer;
-    user-select: none;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 10px;
-    font-weight: 600;
-    border-bottom: 1px solid var(--vscode-panel-border);
-}
-.legend-header:hover {
-    background: var(--vscode-list-hoverBackground);
-}
-.legend-toggle {
-    font-size: 12px;
-    font-weight: bold;
-}
-.legend-content {
-    padding: 4px 8px;
-}
-.legend-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
-    font-size: 9px;
-}
-.legend-item:last-child {
-    margin-bottom: 0;
-}
-.legend-line {
-    width: 20px;
-    height: 2px;
-    border-radius: 1px;
-}
-.legend-line-entry {
-    background: #4CAF50;
-}
-.legend-line-exit {
-    background: #2196F3;
-}
-.legend-line-critical {
-    background: #FF6B6B;
 }
 #minimap {
     position: fixed;
@@ -544,7 +508,7 @@ body {
 }
 #minimap .minimap-viewport {
     fill: none;
-    stroke: #ffffff;
+    stroke: var(--vscode-editor-foreground);
     stroke-width: 2px;
     opacity: 0.9;
     pointer-events: none;
@@ -560,6 +524,145 @@ body {
     opacity: 1 !important;
 }
 
+/* Workflow Directory */
+.workflow-directory {
+    position: fixed;
+    top: 56px;
+    left: 16px;
+    min-width: 160px;
+    max-width: 260px;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    z-index: 1600;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    font-family: var(--vscode-font-family);
+    font-size: 12px;
+}
+.workflow-directory.collapsed {
+    min-width: 140px;
+    max-width: none;
+}
+.directory-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    cursor: pointer;
+}
+.workflow-directory.collapsed .directory-header {
+    border-bottom: none;
+}
+.directory-header:hover {
+    background: rgba(255,255,255,0.05);
+}
+.directory-title {
+    font-weight: 600;
+    color: var(--vscode-foreground);
+    opacity: 0.9;
+}
+.directory-toggle {
+    background: none;
+    border: none;
+    color: var(--vscode-foreground);
+    opacity: 0.6;
+    cursor: pointer;
+    font-size: 10px;
+    padding: 2px;
+    transition: transform 0.2s ease;
+}
+.directory-toggle:hover {
+    opacity: 1;
+}
+.workflow-directory.collapsed .directory-toggle {
+    transform: rotate(-90deg);
+}
+.workflow-directory.collapsed .directory-list {
+    display: none;
+}
+.directory-list {
+    max-height: 300px;
+    overflow-y: scroll;
+    padding: 4px 0;
+    padding-right: 10px;
+    position: relative;
+}
+.directory-list::-webkit-scrollbar {
+    width: 6px;
+}
+.directory-list::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.08);
+    border-radius: 3px;
+}
+.directory-list::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.4);
+    border-radius: 3px;
+}
+.directory-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.5);
+}
+.directory-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    color: var(--vscode-foreground);
+    opacity: 0.8;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+.directory-item:hover {
+    background: rgba(255,255,255,0.08);
+    opacity: 1;
+}
+.directory-item-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.directory-item-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.directory-scroll-container {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0 0 4px 4px;
+}
+.workflow-directory.collapsed .directory-scroll-container {
+    display: none;
+}
+.scroll-indicator {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: var(--vscode-foreground);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 2;
+    transform: scaleX(4);
+}
+.scroll-indicator-top {
+    top: 0;
+    background: linear-gradient(to bottom, var(--vscode-editor-background) 40%, transparent);
+}
+.scroll-indicator-bottom {
+    bottom: 0;
+    background: linear-gradient(to top, var(--vscode-editor-background) 40%, transparent);
+}
+.scroll-indicator.visible {
+    opacity: 0.7;
+}
+
 /* Responsive: Hide stats on narrow viewports */
 @media (max-width: 639px) {
     .snapshot-stats {
@@ -567,7 +670,7 @@ body {
     }
 }
 
-/* Responsive: Scale minimap and legend for smaller viewports */
+/* Responsive: Scale minimap, legend, and workflow directory for smaller viewports */
 @media (max-width: 900px) {
     #minimap {
         width: 160px;
@@ -576,6 +679,14 @@ body {
     .legend {
         width: 160px;
         bottom: 144px;
+    }
+    .workflow-directory {
+        min-width: 140px;
+        max-width: 220px;
+        font-size: 11px;
+    }
+    .directory-list {
+        max-height: 250px;
     }
 }
 
@@ -603,6 +714,21 @@ body {
     .legend-line {
         width: 16px;
     }
+    .workflow-directory {
+        min-width: 120px;
+        max-width: 180px;
+        font-size: 10px;
+    }
+    .directory-header {
+        padding: 4px 8px;
+    }
+    .directory-item {
+        padding: 4px 10px;
+        gap: 6px;
+    }
+    .directory-list {
+        max-height: 200px;
+    }
 }
 
 @media (max-width: 500px) {
@@ -613,5 +739,470 @@ body {
     .legend {
         display: none;
     }
+    .workflow-directory {
+        min-width: 100px;
+        max-width: 140px;
+        font-size: 9px;
+    }
+    .directory-header {
+        padding: 3px 6px;
+        gap: 4px;
+    }
+    .directory-title {
+        font-size: 10px;
+    }
+    .directory-item {
+        padding: 3px 8px;
+        gap: 4px;
+    }
+    .directory-item-dot {
+        width: 6px;
+        height: 6px;
+    }
+    .directory-list {
+        max-height: 150px;
+    }
+}
+
+/* ===========================================
+   File Picker Modal
+   =========================================== */
+
+.file-picker-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5000;
+}
+
+.file-picker-modal {
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.file-picker-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.file-picker-header h2 {
+    margin: 0 0 6px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+.file-picker-header p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    line-height: 1.4;
+}
+
+.file-picker-toolbar {
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-editor-inactiveSelectionBackground);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Toolbar toggles container - left aligned, compact */
+.file-picker-toggles {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Toggle button style - boxed with border */
+.toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    background: transparent;
+    border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.1));
+    border-radius: 4px;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.toggle-btn:hover {
+    background: var(--vscode-list-hoverBackground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.toggle-btn.active {
+    background: var(--vscode-button-secondaryBackground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.toggle-btn input[type="checkbox"] {
+    margin: 0;
+    pointer-events: none;
+}
+
+/* LLM badge in toggle button */
+.toggle-btn .llm-badge {
+    margin-left: 2px;
+}
+
+/* LLM button detecting state */
+.toggle-btn.detecting {
+    cursor: wait;
+}
+
+.toggle-btn.detecting:hover {
+    background: transparent;
+    border-color: var(--vscode-input-border);
+}
+
+.toggle-btn.detecting .llm-badge {
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
+.file-picker-search {
+    flex: 1;
+}
+
+.file-picker-search input {
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 12px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 3px;
+    outline: none;
+}
+
+.file-picker-search input:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+.file-picker-search input::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+.file-picker-tree {
+    flex: 1;
+    overflow-y: scroll;
+    padding: 12px 20px;
+    font-family: var(--vscode-editor-font-family), 'SF Mono', Monaco, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.0;
+}
+
+.file-picker-item {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    padding-left: calc(var(--depth, 0) * 20px + 8px);
+    white-space: nowrap;
+    height: 22px;
+    cursor: pointer;
+    border-radius: 3px;
+    position: relative;
+}
+
+.file-picker-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* Tree lines - vertical line */
+.file-picker-item::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--depth, 0) * 20px);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--vscode-editorLineNumber-foreground);
+    opacity: 0.3;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+/* Tree lines - horizontal connector */
+.file-picker-item::after {
+    content: '';
+    position: absolute;
+    left: calc(var(--depth, 0) * 20px);
+    top: 50%;
+    width: 8px;
+    height: 1px;
+    background: var(--vscode-editorLineNumber-foreground);
+    opacity: 0.3;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+/* Last item - stop vertical line at center */
+.file-picker-item.is-last::before {
+    bottom: 50%;
+}
+
+/* Hover effect - highlight tree lines */
+.file-picker-item:hover::before,
+.file-picker-item:hover::after {
+    opacity: 0.8;
+    background: var(--vscode-focusBorder);
+}
+
+/* Ancestor vertical lines (for non-last items at parent levels) */
+.tree-line {
+    position: absolute;
+    left: calc(var(--line-depth, 0) * 20px);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--vscode-editorLineNumber-foreground);
+    opacity: 0.3;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.file-picker-item:hover .tree-line {
+    opacity: 0.8;
+    background: var(--vscode-focusBorder);
+}
+
+.file-picker-checkbox {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 6px;
+    pointer-events: none;
+}
+
+.file-picker-checkbox input {
+    margin: 0;
+}
+
+.item-icon {
+    margin-right: 3px;
+    font-size: 15px;
+    font-family: 'Hack Nerd Font Mono', 'Hack Nerd Font', monospace;
+    width: 16px;
+    text-align: center;
+}
+
+/* Directory styling - distinct color */
+.file-picker-item.is-directory .item-name {
+    color: var(--vscode-symbolIcon-folderForeground, #dcb67a);
+    font-weight: 500;
+}
+
+.file-picker-item.is-directory .item-icon {
+    color: var(--vscode-symbolIcon-folderForeground, #dcb67a);
+}
+
+/* Directory collapse toggle */
+.dir-toggle {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: var(--vscode-foreground);
+    opacity: 0.6;
+    margin-right: 2px;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+}
+
+.dir-toggle:hover {
+    opacity: 1;
+}
+
+.dir-toggle-spacer {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    margin-right: 2px;
+    flex-shrink: 0;
+}
+
+.file-picker-item.is-directory.collapsed .dir-toggle {
+    transform: rotate(-90deg);
+}
+
+.file-picker-item.collapsed-child {
+    display: none !important;
+}
+
+/* File styling - default */
+.file-picker-item.is-file .item-name {
+    color: var(--vscode-foreground);
+}
+
+/* Files with confirmed LLM calls - highlighted */
+.file-picker-item.is-file.has-llm-calls .item-name {
+    color: var(--vscode-charts-green, #89d185);
+}
+
+/* Files without LLM calls - dimmed */
+.file-picker-item.is-file.no-llm-calls .item-name {
+    color: var(--vscode-disabledForeground);
+    opacity: 0.7;
+}
+
+.llm-badge {
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 9px;
+    font-weight: 600;
+    background: var(--vscode-charts-green, #89d185);
+    color: var(--vscode-editor-background);
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.llm-badge-inline {
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--vscode-charts-green, #89d185);
+    color: var(--vscode-editor-background);
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.file-picker-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--vscode-panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--vscode-editor-inactiveSelectionBackground);
+}
+
+.file-picker-count {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.file-picker-count #selected-count {
+    color: var(--vscode-foreground);
+    font-weight: 600;
+}
+
+.file-picker-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.file-picker-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: var(--vscode-font-family);
+}
+
+.file-picker-btn-cancel {
+    background: transparent;
+    border: 1px solid var(--vscode-button-secondaryBackground, rgba(255,255,255,0.1));
+    color: var(--vscode-foreground);
+}
+
+.file-picker-btn-cancel:hover {
+    background: var(--vscode-button-secondaryHoverBackground, rgba(255,255,255,0.1));
+}
+
+.file-picker-btn-danger {
+    background: #d32f2f;
+    color: #ffffff;
+    border: 1px solid #d32f2f;
+}
+
+.file-picker-btn-danger:hover {
+    background: #b71c1c;
+    border-color: #b71c1c;
+}
+
+.file-picker-btn-primary {
+    background: var(--vscode-button-background);
+    border: 1px solid var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.file-picker-btn-primary:hover {
+    background: var(--vscode-button-hoverBackground);
+}
+
+/* Custom checkbox styling */
+.file-picker-checkbox {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.file-picker-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--vscode-checkbox-background, #3794ff);
+    pointer-events: none;
+}
+
+/* Partial selection indicator */
+.file-picker-checkbox input[type="checkbox"][data-partial="true"] {
+    opacity: 0.6;
+}
+
+/* Side panel responsive */
+@media (max-width: 900px) {
+    .side-panel { width: 280px; right: -280px; }
+    .side-panel.open { right: 0; }
+    .panel-header { padding: 14px; }
+    .panel-header h2 { font-size: 13px; }
+    .panel-content { padding: 14px; }
+    .panel-section { margin-bottom: 14px; }
+    .panel-section label { font-size: 10px; }
+    .type-badge { font-size: 11px; padding: 3px 8px; }
+    .source-link { font-size: 11px; }
+}
+@media (max-width: 700px) {
+    .side-panel { width: 240px; right: -240px; }
+    .side-panel.open { right: 0; }
+    .panel-header { padding: 12px; }
+    .panel-header h2 { font-size: 12px; }
+    .panel-content { padding: 12px; }
+    .panel-section { margin-bottom: 12px; }
+    .panel-section label { font-size: 9px; }
+    .type-badge { font-size: 10px; padding: 3px 7px; }
+    .source-link { font-size: 10px; }
+}
+@media (max-width: 500px) {
+    .side-panel { width: 200px; right: -200px; }
+    .side-panel.open { right: 0; }
+    .panel-header { padding: 10px; }
+    .panel-header h2 { font-size: 11px; }
+    .panel-content { padding: 10px; }
+    .panel-section { margin-bottom: 10px; }
+    .panel-section label { font-size: 8px; }
+    .type-badge { font-size: 9px; padding: 2px 6px; }
+    .source-link { font-size: 9px; }
 }
 

@@ -3,10 +3,12 @@ import * as state from './state';
 import { snapToGrid, getNodeWorkflowCount } from './utils';
 import { createWorkflowPattern } from './setup';
 import { calculateGroupBounds } from './helpers';
+import { measureTextWidth } from './groups';
 import {
     NODE_WIDTH, NODE_HEIGHT,
     DAGRE_NODESEP, DAGRE_RANKSEP, DAGRE_MARGIN,
-    WORKFLOW_SPACING
+    WORKFLOW_SPACING,
+    GROUP_TITLE_OFFSET_X
 } from './constants';
 
 declare const dagre: any;
@@ -84,8 +86,19 @@ export function layoutWorkflows(defs: any): void {
         if (!boundsResult) return;
 
         group.bounds = boundsResult.bounds;
-        group.centerX = boundsResult.centerX;
-        group.centerY = boundsResult.centerY;
+
+        // Expand bounds to fit title if needed
+        const fontFamily = '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif';
+        const titleText = `${group.name} (${group.nodes.length} nodes)`;
+        const titleWidth = measureTextWidth(titleText, '19px', '500', fontFamily);
+        const requiredWidth = titleWidth + GROUP_TITLE_OFFSET_X + 40;
+        const currentWidth = group.bounds.maxX - group.bounds.minX;
+        if (requiredWidth > currentWidth) {
+            group.bounds.maxX = group.bounds.minX + requiredWidth;
+        }
+
+        group.centerX = (group.bounds.minX + group.bounds.maxX) / 2;
+        group.centerY = (group.bounds.minY + group.bounds.maxY) / 2;
 
         // Update Y offset for next workflow
         currentYOffset = group.bounds.maxY + WORKFLOW_SPACING;

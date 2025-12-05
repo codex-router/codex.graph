@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}' https://d3js.org https://cdn.jsdelivr.net; img-src {{cspSource}} data:; font-src {{cspSource}};">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; script-src 'nonce-{{nonce}}' https://d3js.org https://cdn.jsdelivr.net; img-src {{cspSource}} data:; font-src {{cspSource}} https://fonts.gstatic.com https://cdn.jsdelivr.net;">
     <title>LLM Architecture</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <script nonce="{{nonce}}" src="https://d3js.org/d3.v7.min.js"></script>
     <script nonce="{{nonce}}" src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
     <link rel="stylesheet" href="{{stylesUri}}">
@@ -44,36 +47,27 @@
             <button id="btn-format" class="format-btn" title="Reset Layout">
                 <svg viewBox="0 0 24 24"><path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z"/></svg>
             </button>
-            <button id="btn-refresh" class="refresh-btn" title="Reanalyze Entire Workspace">
-                <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            <button id="btn-analyze" class="analyze-btn" title="Analyze Files">
+                <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
             </button>
         </div>
     </div>
 
     <div id="graph"></div>
 
-    <div id="buttonTooltip" class="button-tooltip"></div>
-
-    <div id="legend" class="legend">
-        <div class="legend-header" id="legend-header">
-            <span>Legend</span>
-            <span id="legendToggle" class="legend-toggle">−</span>
+    <div id="workflowDirectory" class="workflow-directory">
+        <div class="directory-header">
+            <span class="directory-title">Workflow Directory</span>
+            <button id="btn-toggle-directory" class="directory-toggle">▼</button>
         </div>
-        <div id="legendContent" class="legend-content">
-            <div class="legend-item">
-                <div class="legend-line legend-line-entry"></div>
-                <span>Entry Point</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-line legend-line-exit"></div>
-                <span>Exit Point</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-line legend-line-critical"></div>
-                <span>Critical Path</span>
-            </div>
+        <div class="directory-scroll-container">
+            <div class="scroll-indicator scroll-indicator-top">▲</div>
+            <div id="directoryList" class="directory-list"></div>
+            <div class="scroll-indicator scroll-indicator-bottom">▼</div>
         </div>
     </div>
+
+    <div id="buttonTooltip" class="button-tooltip"></div>
 
     <div id="minimap"></div>
 
@@ -100,7 +94,10 @@
 
     <div id="sidePanel" class="side-panel">
         <div class="panel-header">
-            <h2 id="panelTitle">Node Details</h2>
+            <div class="panel-header-left">
+                <h2 id="panelTitle">Node Details</h2>
+                <p id="panelWorkflow" class="panel-workflow"></p>
+            </div>
             <button class="close-btn" id="btn-close-panel">&times;</button>
         </div>
         <div class="panel-content">

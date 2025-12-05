@@ -1,8 +1,8 @@
 // Workflow group rendering (expanded and collapsed)
 import * as state from './state';
 import {
-    COLLAPSED_GROUP_WIDTH, COLLAPSED_GROUP_HEIGHT,
-    COLLAPSED_GROUP_HALF_WIDTH, COLLAPSED_GROUP_HALF_HEIGHT,
+    COLLAPSED_GROUP_HEIGHT,
+    COLLAPSED_GROUP_HALF_HEIGHT,
     COLLAPSED_GROUP_BORDER_RADIUS,
     GROUP_TITLE_OFFSET_X, GROUP_TITLE_OFFSET_Y,
     GROUP_COLLAPSE_BTN_X, GROUP_COLLAPSE_BTN_Y, GROUP_COLLAPSE_BTN_SIZE,
@@ -10,6 +10,23 @@ import {
 } from './constants';
 
 declare const d3: any;
+
+// Minimum width for collapsed groups
+const MIN_COLLAPSED_WIDTH = 200;
+const COLLAPSED_PADDING = 60; // padding on each side of text
+
+// Measure text width using a temporary SVG element
+export function measureTextWidth(text: string, fontSize: string, fontWeight: string, fontFamily: string): number {
+    const svg = d3.select('body').append('svg').style('visibility', 'hidden').style('position', 'absolute');
+    const textEl = svg.append('text')
+        .style('font-size', fontSize)
+        .style('font-weight', fontWeight)
+        .style('font-family', fontFamily)
+        .text(text);
+    const width = textEl.node().getBBox().width;
+    svg.remove();
+    return width;
+}
 
 export function renderGroups(updateGroupVisibility: () => void): void {
     const { g, workflowGroups } = state;
@@ -20,6 +37,18 @@ export function renderGroups(updateGroupVisibility: () => void): void {
 
     // Filter out groups without bounds and workflows with < 3 nodes
     const groupsWithBounds = workflowGroups.filter((grp: any) => grp.bounds && grp.nodes.length >= 3);
+
+    // Expand bounds to fit title if needed
+    const fontFamily = '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif';
+    groupsWithBounds.forEach((grp: any) => {
+        const titleText = `${grp.name} (${grp.nodes.length} nodes)`;
+        const titleWidth = measureTextWidth(titleText, '19px', '500', fontFamily);
+        const requiredWidth = titleWidth + GROUP_TITLE_OFFSET_X + 40; // left offset + right padding
+        const currentWidth = grp.bounds.maxX - grp.bounds.minX;
+        if (requiredWidth > currentWidth) {
+            grp.bounds.maxX = grp.bounds.minX + requiredWidth;
+        }
+    });
 
     const groupElements = groupContainer.selectAll('.workflow-group')
         .data(groupsWithBounds, (d: any) => d.id)
@@ -37,7 +66,7 @@ export function renderGroups(updateGroupVisibility: () => void): void {
         .attr('height', (d: any) => d.bounds.maxY - d.bounds.minY)
         .attr('rx', COLLAPSED_GROUP_BORDER_RADIUS)
         .style('fill', (d: any) => d.color)
-        .style('fill-opacity', 0.1)
+        .style('fill-opacity', 0.03)
         .style('stroke', (d: any) => d.color)
         .style('stroke-width', `${GROUP_STROKE_WIDTH}px`)
         .style('stroke-dasharray', '8,4')
@@ -52,8 +81,8 @@ export function renderGroups(updateGroupVisibility: () => void): void {
         .attr('dominant-baseline', 'middle')
         .style('fill', (d: any) => d.color)
         .style('font-family', '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif')
-        .style('font-size', '17px')
-        .style('font-weight', '700')
+        .style('font-size', '19px')
+        .style('font-weight', '500')
         .style('display', (d: any) => (d.collapsed || d.id === 'group_orphans') ? 'none' : 'block')
         .style('pointer-events', 'none')
         .text((d: any) => `${d.name} (${d.nodes.length} nodes)`);
@@ -99,6 +128,15 @@ export function renderCollapsedGroups(updateGroupVisibility: () => void): void {
 
     const groupsWithBounds = workflowGroups.filter((grp: any) => grp.bounds && grp.nodes.length >= 3);
 
+    // Calculate dynamic width for each collapsed group based on title
+    const fontFamily = '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif';
+    groupsWithBounds.forEach((grp: any) => {
+        const titleWidth = measureTextWidth(grp.name, '21px', '600', fontFamily);
+        const calculatedWidth = titleWidth + COLLAPSED_PADDING;
+        grp.collapsedWidth = Math.max(calculatedWidth, MIN_COLLAPSED_WIDTH);
+        grp.collapsedHalfWidth = grp.collapsedWidth / 2;
+    });
+
     // Render collapsed groups AFTER edges/nodes for proper z-index
     const collapsedGroupContainer = g.append('g').attr('class', 'collapsed-groups');
 
@@ -119,9 +157,9 @@ export function renderCollapsedGroups(updateGroupVisibility: () => void): void {
     // Background with pegboard pattern
     collapsedGroups.append('rect')
         .attr('class', 'collapsed-bg-pattern')
-        .attr('x', (d: any) => d.centerX - COLLAPSED_GROUP_HALF_WIDTH)
+        .attr('x', (d: any) => d.centerX - d.collapsedHalfWidth)
         .attr('y', (d: any) => d.centerY - COLLAPSED_GROUP_HALF_HEIGHT)
-        .attr('width', COLLAPSED_GROUP_WIDTH)
+        .attr('width', (d: any) => d.collapsedWidth)
         .attr('height', COLLAPSED_GROUP_HEIGHT)
         .attr('rx', COLLAPSED_GROUP_BORDER_RADIUS)
         .style('fill', (d: any) => `url(#pegboard-${d.id})`)
@@ -132,9 +170,9 @@ export function renderCollapsedGroups(updateGroupVisibility: () => void): void {
     // Solid color overlay
     collapsedGroups.append('rect')
         .attr('class', 'collapsed-bg-overlay')
-        .attr('x', (d: any) => d.centerX - COLLAPSED_GROUP_HALF_WIDTH)
+        .attr('x', (d: any) => d.centerX - d.collapsedHalfWidth)
         .attr('y', (d: any) => d.centerY - COLLAPSED_GROUP_HALF_HEIGHT)
-        .attr('width', COLLAPSED_GROUP_WIDTH)
+        .attr('width', (d: any) => d.collapsedWidth)
         .attr('height', COLLAPSED_GROUP_HEIGHT)
         .attr('rx', COLLAPSED_GROUP_BORDER_RADIUS)
         .style('fill', (d: any) => d.color)
@@ -144,9 +182,9 @@ export function renderCollapsedGroups(updateGroupVisibility: () => void): void {
     // Single foreignObject for all text content with flexbox layout
     const contentFO = collapsedGroups.append('foreignObject')
         .attr('class', 'collapsed-content')
-        .attr('x', (d: any) => d.centerX - COLLAPSED_GROUP_HALF_WIDTH)
+        .attr('x', (d: any) => d.centerX - d.collapsedHalfWidth)
         .attr('y', (d: any) => d.centerY - COLLAPSED_GROUP_HALF_HEIGHT)
-        .attr('width', COLLAPSED_GROUP_WIDTH)
+        .attr('width', (d: any) => d.collapsedWidth)
         .attr('height', COLLAPSED_GROUP_HEIGHT);
 
     const contentDiv = contentFO.append('xhtml:div')
@@ -160,28 +198,22 @@ export function renderCollapsedGroups(updateGroupVisibility: () => void): void {
         .style('box-sizing', 'border-box')
         .style('gap', '8px');
 
-    // Title (with line clamping)
+    // Title
     contentDiv.append('xhtml:div')
         .attr('class', 'collapsed-title')
-        .style('display', '-webkit-box')
-        .style('-webkit-line-clamp', '3')
-        .style('-webkit-box-orient', 'vertical')
-        .style('overflow', 'hidden')
-        .style('text-overflow', 'ellipsis')
         .style('text-align', 'center')
-        .style('color', '#ffffff')
+        .style('color', 'var(--vscode-editor-foreground)')
         .style('font-family', '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif')
-        .style('font-size', '19px')
+        .style('font-size', '21px')
         .style('font-weight', '600')
         .style('line-height', '1.3')
-        .style('word-wrap', 'break-word')
-        .style('max-width', '220px')
+        .style('white-space', 'nowrap')
         .text((d: any) => d.name);
 
     // Stats line
     contentDiv.append('xhtml:div')
         .attr('class', 'collapsed-stats')
-        .style('color', '#ffffff')
+        .style('color', 'var(--vscode-editor-foreground)')
         .style('opacity', '0.9')
         .style('font-family', '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif')
         .style('font-size', '15px')
@@ -189,17 +221,18 @@ export function renderCollapsedGroups(updateGroupVisibility: () => void): void {
         .style('text-align', 'center')
         .text((d: any) => `${d.nodes.length} nodes • ${d.llmProvider}`);
 
-    // Expand icon in bottom-right corner
-    collapsedGroups.append('text')
-        .attr('class', 'collapsed-expand-icon')
-        .attr('x', (d: any) => d.centerX + COLLAPSED_GROUP_HALF_WIDTH - 22)
-        .attr('y', (d: any) => d.centerY + COLLAPSED_GROUP_HALF_HEIGHT - 14)
-        .attr('text-anchor', 'middle')
-        .style('fill', '#ffffff')
-        .style('opacity', 0.6)
-        .style('font-size', '16px')
-        .style('pointer-events', 'none')
-        .text('⤢');
+    // Expand hint (centered below stats)
+    contentDiv.append('xhtml:div')
+        .attr('class', 'collapsed-expand-hint')
+        .style('display', 'flex')
+        .style('align-items', 'center')
+        .style('justify-content', 'center')
+        .style('gap', '6px')
+        .style('color', 'var(--vscode-editor-foreground)')
+        .style('opacity', '0.6')
+        .style('font-family', '"Inter", "Segoe UI", "SF Pro Display", -apple-system, sans-serif')
+        .style('font-size', '11px')
+        .html('Click to expand <span style="font-size:16px">⤢</span>');
 
     state.setCollapsedGroups(collapsedGroups);
     state.setContainers(state.groupContainer, collapsedGroupContainer);
