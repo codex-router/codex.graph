@@ -14,14 +14,10 @@ export class WorkflowDetector {
         /from\s+anthropic\s+import|import\s+.*Anthropic|new\s+Anthropic\s*\(/,
         /import\s+.*from\s+['"]@anthropic-ai\/sdk['"]/,
 
-        // Google Gemini
-        /import\s+google\.generativeai|genai\.configure|genai\.GenerativeModel/,
+        // Google Gemini (old and new SDKs)
+        /import\s+google\.generativeai|from\s+google\s+import\s+genai|genai\.configure|genai\.Client|genai\.GenerativeModel/,
         /from\s+['"]@google\/generative-ai['"]/,
         /GoogleGenerativeAI/,
-
-        // Groq
-        /from\s+groq\s+import|import\s+.*Groq|new\s+Groq\s*\(/,
-        /import\s+.*from\s+['"]groq-sdk['"]/,
 
         // Ollama
         /from\s+ollama\s+import|import\s+.*ollama/,
@@ -444,16 +440,15 @@ export class WorkflowDetector {
 
     static detectFramework(content: string): string | null {
         // Check xAI/Grok FIRST (uses OpenAI SDK with different base_url)
-        if (this.LLM_CLIENT_PATTERNS[15].test(content) || this.LLM_CLIENT_PATTERNS[16].test(content) || this.LLM_CLIENT_PATTERNS[17].test(content)) return 'grok';
+        if (this.LLM_CLIENT_PATTERNS[13].test(content) || this.LLM_CLIENT_PATTERNS[14].test(content) || this.LLM_CLIENT_PATTERNS[15].test(content)) return 'grok';
 
         // Check for LLM clients
         if (this.LLM_CLIENT_PATTERNS[0].test(content) || this.LLM_CLIENT_PATTERNS[1].test(content)) return 'openai';
         if (this.LLM_CLIENT_PATTERNS[2].test(content) || this.LLM_CLIENT_PATTERNS[3].test(content)) return 'anthropic';
         if (this.LLM_CLIENT_PATTERNS[4].test(content) || this.LLM_CLIENT_PATTERNS[5].test(content) || this.LLM_CLIENT_PATTERNS[6].test(content)) return 'gemini';
-        if (this.LLM_CLIENT_PATTERNS[7].test(content) || this.LLM_CLIENT_PATTERNS[8].test(content)) return 'groq';
-        if (this.LLM_CLIENT_PATTERNS[9].test(content) || this.LLM_CLIENT_PATTERNS[10].test(content)) return 'ollama';
-        if (this.LLM_CLIENT_PATTERNS[11].test(content) || this.LLM_CLIENT_PATTERNS[12].test(content)) return 'cohere';
-        if (this.LLM_CLIENT_PATTERNS[13].test(content) || this.LLM_CLIENT_PATTERNS[14].test(content)) return 'huggingface';
+        if (this.LLM_CLIENT_PATTERNS[7].test(content) || this.LLM_CLIENT_PATTERNS[8].test(content)) return 'ollama';
+        if (this.LLM_CLIENT_PATTERNS[9].test(content) || this.LLM_CLIENT_PATTERNS[10].test(content)) return 'cohere';
+        if (this.LLM_CLIENT_PATTERNS[11].test(content) || this.LLM_CLIENT_PATTERNS[12].test(content)) return 'huggingface';
 
         // Then check for specific frameworks (less specific, might have false positives)
         for (const [framework, patterns] of Object.entries(this.FRAMEWORK_PATTERNS)) {
@@ -481,11 +476,10 @@ export class WorkflowDetector {
         if (this.LLM_CLIENT_PATTERNS[0].test(content) || this.LLM_CLIENT_PATTERNS[1].test(content)) detected.push('OpenAI');
         if (this.LLM_CLIENT_PATTERNS[2].test(content) || this.LLM_CLIENT_PATTERNS[3].test(content)) detected.push('Anthropic');
         if (this.LLM_CLIENT_PATTERNS[4].test(content) || this.LLM_CLIENT_PATTERNS[5].test(content) || this.LLM_CLIENT_PATTERNS[6].test(content)) detected.push('Gemini');
-        if (this.LLM_CLIENT_PATTERNS[7].test(content) || this.LLM_CLIENT_PATTERNS[8].test(content)) detected.push('Groq');
-        if (this.LLM_CLIENT_PATTERNS[9].test(content) || this.LLM_CLIENT_PATTERNS[10].test(content)) detected.push('Ollama');
-        if (this.LLM_CLIENT_PATTERNS[11].test(content) || this.LLM_CLIENT_PATTERNS[12].test(content)) detected.push('Cohere');
-        if (this.LLM_CLIENT_PATTERNS[13].test(content) || this.LLM_CLIENT_PATTERNS[14].test(content)) detected.push('HuggingFace');
-        if (this.LLM_CLIENT_PATTERNS[15].test(content) || this.LLM_CLIENT_PATTERNS[16].test(content) || this.LLM_CLIENT_PATTERNS[17].test(content)) detected.push('Grok');
+        if (this.LLM_CLIENT_PATTERNS[7].test(content) || this.LLM_CLIENT_PATTERNS[8].test(content)) detected.push('Ollama');
+        if (this.LLM_CLIENT_PATTERNS[9].test(content) || this.LLM_CLIENT_PATTERNS[10].test(content)) detected.push('Cohere');
+        if (this.LLM_CLIENT_PATTERNS[11].test(content) || this.LLM_CLIENT_PATTERNS[12].test(content)) detected.push('HuggingFace');
+        if (this.LLM_CLIENT_PATTERNS[13].test(content) || this.LLM_CLIENT_PATTERNS[14].test(content) || this.LLM_CLIENT_PATTERNS[15].test(content)) detected.push('Grok');
 
         // AI Service Domains - require API URLs or SDK imports, not just keywords
         if (/api\.elevenlabs\.io|from\s+elevenlabs|import\s+elevenlabs|['"]elevenlabs['"]/i.test(content)) detected.push('ElevenLabs');

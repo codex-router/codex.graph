@@ -116,7 +116,7 @@ export class CacheManager {
             const normalized = {
                 // LLM-related imports (sorted for consistency)
                 imports: analysis.imports.filter(imp =>
-                    /openai|anthropic|gemini|groq|ollama|cohere|langchain|langgraph|mastra|crewai|xai|grok|elevenlabs|runway|sync|stability|heygen|d-id|leonardo/i.test(imp)
+                    /openai|anthropic|gemini|ollama|cohere|langchain|langgraph|mastra|crewai|xai|grok|elevenlabs|runway|sync|stability|heygen|d-id|leonardo/i.test(imp)
                 ).sort(),
 
                 // LLM-related variables (sorted)

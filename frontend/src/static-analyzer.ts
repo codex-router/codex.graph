@@ -22,7 +22,7 @@ export interface FileAnalysis {
 // LLM identifier patterns - shared across all analyzers
 const LLM_PATTERNS = [
     /openai/i, /anthropic/i, /gemini/i, /genai/i,
-    /groq/i, /ollama/i, /cohere/i, /gpt/i, /claude/i,
+    /ollama/i, /cohere/i, /gpt/i, /claude/i,
     /llm/i, /model/i, /client/i, /chat/i, /completion/i,
     /GenerativeModel/i, /xai/i, /grok/i
 ];

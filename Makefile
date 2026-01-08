@@ -31,8 +31,12 @@ run:
 	@cd backend && ./venv/bin/python3.11 main.py > ../backend.log 2>&1 & echo $$! > ../backend.pid && \
 		echo "Backend running on port 8000 (PID: $$!)"
 	@sleep 2
+	@echo "Backend running on port 8000"
 	@echo "Launching VSCode extension..."
 	@code --extensionDevelopmentPath=$(PWD)/frontend --user-data-dir=$(PWD)/.vscode-dev $(PWD)
+	@echo ""
+	@echo "=== Backend logs (Ctrl+C to stop) ==="
+	@tail -f backend.log
 
 debug:
 	@echo "Compiling frontend..."
