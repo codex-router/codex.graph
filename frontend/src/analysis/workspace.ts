@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { APIClient, WorkflowGraph, TrialExhaustedError } from '../api';
 import { AuthManager } from '../auth';
 import { CacheManager } from '../cache';
@@ -16,15 +17,17 @@ import { extractRepoStructure, formatStructureForLLM, formatHttpConnectionsForPr
 import { resolveExternalEdges, logResolutionStats } from '../edge-resolver';
 import { formatFileXML, combineFilesXML, createDependencyBatches } from '../file-preparation';
 import { estimateTokens, CostAggregator, displayCostReport, estimateAnalysisCost } from '../cost-tracking';
-import { withHttpEdges, traceCallGraphToLLM } from './helpers';
+import { withHttpEdges, traceCallGraphToLLM, runWithConcurrency } from './helpers';
 import {
     getAnalysisSession,
     setHttpConnections,
     setCrossFileCalls,
     setRepoFiles,
     setPendingAnalysisTask,
-    getPendingAnalysisTask
+    getPendingAnalysisTask,
+    setCachedCallGraph
 } from './state';
+import { extractCallGraph } from '../call-graph-extractor';
 
 /**
  * Context needed for workspace analysis.
@@ -37,6 +40,24 @@ export interface WorkspaceContext {
     metadataBuilder: MetadataBuilder;
     extensionContext: vscode.ExtensionContext;
     log: (msg: string) => void;
+}
+
+function testLiveUpdate() {                                                                                            
+      console.log('test');                                                                                               
+}                                                                                                                      
+          
+
+/**
+ * Extract and cache call graphs for all files in a content map.
+ * This enables instant local updates on the first edit after analysis.
+ */
+function cacheCallGraphsForFiles(contentMap: Record<string, string>, workspaceRoot: string): void {
+    for (const [relativePath, content] of Object.entries(contentMap)) {
+        // Build absolute path for call graph cache key (matches handler.ts usage)
+        const absolutePath = path.join(workspaceRoot, relativePath);
+        const callGraph = extractCallGraph(content, relativePath);
+        setCachedCallGraph(absolutePath, callGraph);
+    }
 }
 
 /**
@@ -78,6 +99,7 @@ export async function analyzeWorkspace(
         );
         return;
     }
+    const workspaceRoot = workspaceFolders[0].uri.fsPath;
 
     try {
         // Show panel immediately (don't block on file detection)
@@ -427,6 +449,7 @@ export async function analyzeWorkspace(
                                 });
 
                                 await cache.setAnalysisResult(graph, contentMap);
+                                cacheCallGraphsForFiles(contentMap, workspaceRoot);
 
                                 // Incremental graph update - only if THIS batch added nodes
                                 if (graph.nodes.length > 0) {
@@ -679,6 +702,7 @@ export async function analyzeWorkspace(
                         const contentMap: Record<string, string> = {};
                         for (const f of files) contentMap[f.path] = f.content;
                         await cache.setAnalysisResult(graph, contentMap);
+                        cacheCallGraphsForFiles(contentMap, workspaceRoot);
                     }
                 }
 
@@ -782,6 +806,7 @@ export async function analyzeWorkspace(
                                 const contentMap: Record<string, string> = {};
                                 for (const f of batch) contentMap[f.path] = f.content;
                                 await cache.setAnalysisResult({ nodes: [], edges: [], llms_detected: [], workflows: [] }, contentMap);
+                                cacheCallGraphsForFiles(contentMap, workspaceRoot);
                             }
                             return null;
                         }
@@ -833,6 +858,7 @@ export async function analyzeWorkspace(
                                     // Cache successful fallback analysis (only successful results get cached)
                                     if (!bypassCache) {
                                         await cache.setAnalysisResult(fileGraph, { [file.path]: file.content });
+                                        cacheCallGraphsForFiles({ [file.path]: file.content }, workspaceRoot);
                                         log(`  Cached ${relativePath}`);
                                     }
                                 } catch (fileError: any) {
@@ -849,6 +875,7 @@ export async function analyzeWorkspace(
                                         // Cache this file as having 0 nodes
                                         if (!bypassCache) {
                                             await cache.setAnalysisResult({ nodes: [], edges: [], llms_detected: [], workflows: [] }, { [file.path]: file.content });
+                                            cacheCallGraphsForFiles({ [file.path]: file.content }, workspaceRoot);
                                         }
                                         return;
                                     }
@@ -870,65 +897,57 @@ export async function analyzeWorkspace(
                     }
                 }
 
-                // Process batches in chunks of maxConcurrency with incremental graph updates
-                for (let chunkStart = 0; chunkStart < batches.length; chunkStart += maxConcurrency) {
-                    const chunkEnd = Math.min(chunkStart + maxConcurrency, batches.length);
-                    const batchChunk = batches.slice(chunkStart, chunkEnd);
-
-                    // Process this chunk in parallel, update progress as each completes
-                    const chunkPromises = batchChunk.map((batch, chunkIdx) => {
-                        const batchIndex = chunkStart + chunkIdx;
-                        return analyzeBatch(batch, batchIndex, batches.length, metadata, newGraphs, costAggregator, condensedStructure, httpConnectionsContext)
-                            .then(async (batchGraph) => {
-                                completedBatchCount++;
-                                if (batchGraph) {
-                                    // Cache per-file (only successful results get cached)
-                                    await cacheBatchGraph(batch, batchGraph);
-                                    log(`✓ Cached batch ${batchIndex + 1} with ${batch.length} files`);
-
-                                    // Incremental graph update - only if THIS batch added nodes
-                                    if (batchGraph.nodes.length > 0) {
-                                        try {
-                                            const currentMerged = await cache.getMergedGraph();
-                                            if (currentMerged && currentMerged.nodes.length > 0) {
-                                                webview.updateGraph(withHttpEdges(currentMerged, log)!);
-                                            }
-                                        } catch (updateError: any) {
-                                            log(`Warning: Incremental update failed: ${updateError.message}`);
-                                        }
-                                    }
-                                }
-                                // Note: batchCompleted already called in analyzeBatch on success
-                                // For non-throwing failures (null return), we still need to mark progress
-                                if (!batchGraph) {
-                                    webview.batchCompleted(0);
-                                }
-                                log(`✓ Progress: ${completedBatchCount}/${batches.length} batches`);
-                            })
-                            .catch((batchError: any) => {
-                                // Don't let individual batch failures kill the whole analysis
-                                // TrialExhaustedError is re-thrown to trigger auth flow
-                                if (batchError instanceof TrialExhaustedError) {
-                                    throw batchError;
-                                }
-                                log(`⚠️ Batch ${batchIndex + 1} error: ${batchError.message}`);
-                                completedBatchCount++;
-                                // Mark failed batch as processed (0 files analyzed)
-                                webview.batchCompleted(0);
-                            });
-                    });
-
+                // Process batches with worker pool - each worker picks up next batch immediately
+                const batchTasks = batches.map((batch, batchIndex) => async () => {
                     try {
-                        await Promise.all(chunkPromises);
-                    } catch (chunkError: any) {
-                        // Only TrialExhaustedError should propagate here
-                        if (chunkError instanceof TrialExhaustedError) {
+                        const batchGraph = await analyzeBatch(batch, batchIndex, batches.length, metadata, newGraphs, costAggregator, condensedStructure, httpConnectionsContext);
+                        completedBatchCount++;
+                        if (batchGraph) {
+                            // Cache per-file (only successful results get cached)
+                            await cacheBatchGraph(batch, batchGraph);
+                            log(`✓ Cached batch ${batchIndex + 1} with ${batch.length} files`);
+
+                            // Incremental graph update - only if THIS batch added nodes
+                            if (batchGraph.nodes.length > 0) {
+                                try {
+                                    const currentMerged = await cache.getMergedGraph();
+                                    if (currentMerged && currentMerged.nodes.length > 0) {
+                                        webview.updateGraph(withHttpEdges(currentMerged, log)!);
+                                    }
+                                } catch (updateError: any) {
+                                    log(`Warning: Incremental update failed: ${updateError.message}`);
+                                }
+                            }
+                        }
+                        // Note: batchCompleted already called in analyzeBatch on success
+                        // For non-throwing failures (null return), we still need to mark progress
+                        if (!batchGraph) {
+                            webview.batchCompleted(0);
+                        }
+                        log(`✓ Progress: ${completedBatchCount}/${batches.length} batches`);
+                        return batchGraph;
+                    } catch (batchError: any) {
+                        // TrialExhaustedError needs to stop all processing
+                        if (batchError instanceof TrialExhaustedError) {
                             log('[auth] Trial quota exhausted, storing pending task...');
                             setPendingAnalysisTask(() => analyzeWorkspace(ctx, false));
                             webview.showAuthPanel();
-                            return;
+                            throw batchError; // Stop the worker pool
                         }
-                        log(`Chunk failed: ${chunkError.message}`);
+                        log(`⚠️ Batch ${batchIndex + 1} error: ${batchError.message}`);
+                        completedBatchCount++;
+                        // Mark failed batch as processed (0 files analyzed)
+                        webview.batchCompleted(0);
+                        return null;
+                    }
+                });
+
+                try {
+                    await runWithConcurrency(batchTasks, maxConcurrency);
+                } catch (poolError: any) {
+                    // Only TrialExhaustedError propagates here - already handled above
+                    if (!(poolError instanceof TrialExhaustedError)) {
+                        log(`Analysis pool failed: ${poolError.message}`);
                     }
                 }
 

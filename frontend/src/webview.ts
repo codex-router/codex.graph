@@ -165,7 +165,27 @@ export class WebviewManager {
 
                         const fileUri = vscode.Uri.file(filePath);
                         const document = await vscode.workspace.openTextDocument(fileUri);
-                        const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+
+                        // Open in a column different from Codag panel
+                        // Find existing text editors to reuse, or create in column that's not Codag's
+                        const codagColumn = this.panel?.viewColumn || vscode.ViewColumn.Two;
+                        let targetColumn = vscode.ViewColumn.One;
+
+                        // If Codag is in column 1, use column 2; otherwise use column 1
+                        if (codagColumn === vscode.ViewColumn.One) {
+                            targetColumn = vscode.ViewColumn.Two;
+                        }
+
+                        // Check if there's already an editor in our target column we can reuse
+                        const existingEditor = vscode.window.visibleTextEditors.find(
+                            e => e.viewColumn === targetColumn
+                        );
+                        if (existingEditor) {
+                            // Reuse existing editor's column
+                            targetColumn = existingEditor.viewColumn!;
+                        }
+
+                        const editor = await vscode.window.showTextDocument(document, targetColumn);
 
                         const line = message.line - 1;
                         const range = new vscode.Range(line, 0, line, 0);
@@ -282,7 +302,7 @@ export class WebviewManager {
             this.panel = vscode.window.createWebviewPanel(
                 'codag',
                 'LLM Architecture',
-                vscode.ViewColumn.Beside,
+                vscode.ViewColumn.Two,
                 {
                     enableScripts: true,
                     retainContextWhenHidden: true,
@@ -340,7 +360,7 @@ export class WebviewManager {
             this.panel = vscode.window.createWebviewPanel(
                 'codag',
                 'LLM Architecture',
-                vscode.ViewColumn.Beside,
+                vscode.ViewColumn.Two,
                 {
                     enableScripts: true,
                     retainContextWhenHidden: true,
@@ -421,11 +441,13 @@ export class WebviewManager {
         };
     }
 
-    updateGraph(graph: WorkflowGraph) {
+    updateGraph(graph: WorkflowGraph, pendingNodeIds?: string[], fileChange?: { filePath: string; functions: string[] }) {
         this.postMessage({
             command: 'updateGraph',
             graph,
-            preserveState: true
+            preserveState: true,
+            pendingNodeIds,
+            fileChange
         });
     }
 
@@ -478,7 +500,7 @@ export class WebviewManager {
             this.panel = vscode.window.createWebviewPanel(
                 'codag',
                 'LLM Architecture',
-                vscode.ViewColumn.Beside,
+                vscode.ViewColumn.Two,
                 {
                     enableScripts: true,
                     retainContextWhenHidden: true,

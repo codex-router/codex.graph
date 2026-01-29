@@ -123,14 +123,6 @@ export interface NodePosition {
     fy?: number;
 }
 
-export interface SavedState {
-    zoomTransform: any;
-    collapsedWorkflows: string[];
-    expandedComponents: string[];  // Component IDs that are expanded (default: collapsed)
-    selectedNodeId: string | null;
-    nodePositions: Map<string, NodePosition>;
-}
-
 export interface GraphDiff {
     nodes: {
         added: WorkflowNode[];

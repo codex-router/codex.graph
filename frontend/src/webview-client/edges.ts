@@ -463,6 +463,11 @@ function showEdgeTooltip(d: any, event: any): void {
     const tooltip = document.getElementById('edgeTooltip');
     if (!tooltip) return;
 
+    // Skip tooltip if edge has no meaningful content
+    const hasContent = d.label || d.condition || d.payload ||
+        (d.isBidirectional && d.reverseEdge && (d.reverseEdge.label || d.reverseEdge.condition || d.reverseEdge.payload));
+    if (!hasContent) return;
+
     const { currentGraphData } = state;
 
     // Helper to get node label from ID

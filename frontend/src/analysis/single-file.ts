@@ -9,7 +9,8 @@ import { AuthManager } from '../auth';
 import { CacheManager } from '../cache';
 import { WebviewManager } from '../webview';
 import { withHttpEdges } from './helpers';
-import { setPendingAnalysisTask } from './state';
+import { setPendingAnalysisTask, setCachedCallGraph } from './state';
+import { extractCallGraph } from '../call-graph-extractor';
 
 /**
  * Context needed for single file analysis.
@@ -68,6 +69,9 @@ export async function analyzeAndUpdateSingleFile(
         if (result && result.nodes && result.nodes.length > 0) {
             // Cache the new result
             await cache.setAnalysisResult(result, { [filePath]: content });
+            // Cache call graph for instant local updates
+            const callGraph = extractCallGraph(content, filePath);
+            setCachedCallGraph(uri.fsPath, callGraph);
             log(`Updated cache for ${vscode.workspace.asRelativePath(filePath)}: ${result.nodes.length} nodes`);
         } else {
             // Cache empty result
@@ -77,6 +81,9 @@ export async function analyzeAndUpdateSingleFile(
                 llms_detected: [],
                 workflows: []
             }, { [filePath]: content });
+            // Cache call graph even for empty results (enables local updates later)
+            const callGraph = extractCallGraph(content, filePath);
+            setCachedCallGraph(uri.fsPath, callGraph);
             log(`No nodes found after update`);
         }
 

@@ -322,6 +322,20 @@ export function pulseNodes(nodeIds: string[]): void {
 }
 
 /**
+ * Smooth fade-in animation for newly added nodes.
+ * Starts invisible and fades to full opacity.
+ */
+export function fadeInNodes(nodeIds: string[]): void {
+    nodeIds.forEach(id => {
+        const node = d3.select(`.node[data-node-id="${id}"]`);
+        if (node.empty()) return;
+        node.style('opacity', 0)
+            .transition().duration(400)
+            .style('opacity', 1);
+    });
+}
+
+/**
  * Hydrate node labels after metadata is fetched.
  * Smoothly updates labels without re-rendering the entire graph.
  *
@@ -387,13 +401,55 @@ export function clearNodesSyncing(nodeIds: string[]): void {
 }
 
 /**
+ * Mark nodes as "pending" (awaiting LLM metadata).
+ * Shows dashed border and italic text via CSS.
+ *
+ * @param nodeIds Array of node IDs to mark as pending
+ */
+export function markNodesPending(nodeIds: string[]): void {
+    nodeIds.forEach(id => {
+        const nodeElement = d3.select(`.node[data-node-id="${id}"]`);
+        if (!nodeElement.empty()) {
+            nodeElement.classed('pending', true);
+            nodeElement.select('.node-border').classed('pending', true);
+        }
+        // Also mark in minimap
+        const minimapNode = d3.select(`.minimap-node[data-node-id="${id}"]`);
+        if (!minimapNode.empty()) {
+            minimapNode.classed('pending', true);
+        }
+    });
+}
+
+/**
+ * Clear pending state from nodes (after metadata arrives).
+ * Smoothly transitions to normal appearance.
+ *
+ * @param nodeIds Array of node IDs to clear pending state
+ */
+export function clearNodesPending(nodeIds: string[]): void {
+    nodeIds.forEach(id => {
+        const nodeElement = d3.select(`.node[data-node-id="${id}"]`);
+        if (!nodeElement.empty()) {
+            nodeElement.classed('pending', false);
+            nodeElement.select('.node-border').classed('pending', false);
+        }
+        // Also clear in minimap
+        const minimapNode = d3.select(`.minimap-node[data-node-id="${id}"]`);
+        if (!minimapNode.empty()) {
+            minimapNode.classed('pending', false);
+        }
+    });
+}
+
+/**
  * Get all node IDs that match the given file path and optionally specific functions
  */
 export function getNodesByFileAndFunctions(filePath: string, functions?: string[]): string[] {
     const { currentGraphData } = state;
     if (!currentGraphData?.nodes) return [];
 
-    return currentGraphData.nodes
+    const matched = currentGraphData.nodes
         .filter(node => {
             if (node.source?.file !== filePath) return false;
             // If no functions specified, don't match any (require explicit function list)
@@ -402,26 +458,31 @@ export function getNodesByFileAndFunctions(filePath: string, functions?: string[
             return functions.includes(node.source.function);
         })
         .map(node => node.id);
+
+    return matched;
 }
 
 /**
- * Apply file change state CSS class to nodes matching the given file path and functions
+ * Apply file change state CSS class to nodes matching the given file path.
+ * Note: We match ALL nodes from the file, not specific functions, because
+ * LLM-generated node.source.function values don't match call graph function names.
  */
 export function applyFileChangeState(
     filePath: string,
-    functions: string[] | undefined,
+    _functions: string[] | undefined,  // Kept for API compatibility but not used
     changeState: 'active' | 'changed' | 'unchanged'
 ): void {
-    // For 'unchanged', clear all indicators for this file regardless of functions
+    const { currentGraphData } = state;
+    if (!currentGraphData?.nodes) return;
+
+    // Get ALL nodes from this file (function matching doesn't work due to name mismatch)
+    const nodeIds = currentGraphData.nodes
+        .filter(node => node.source?.file === filePath)
+        .map(node => node.id);
+
     if (changeState === 'unchanged') {
-        const { currentGraphData } = state;
-        if (!currentGraphData?.nodes) return;
-
-        const allFileNodeIds = currentGraphData.nodes
-            .filter(node => node.source?.file === filePath)
-            .map(node => node.id);
-
-        allFileNodeIds.forEach(nodeId => {
+        // Clear all indicators for this file
+        nodeIds.forEach(nodeId => {
             const border = document.querySelector(`.node[data-node-id="${nodeId}"] .node-border`);
             if (border) {
                 border.classList.remove('file-active', 'file-changed');
@@ -434,8 +495,7 @@ export function applyFileChangeState(
         return;
     }
 
-    // For 'active' or 'changed', only apply to specific functions
-    const nodeIds = getNodesByFileAndFunctions(filePath, functions);
+    // For 'active' or 'changed', apply to all nodes from the file
 
     nodeIds.forEach(nodeId => {
         const border = document.querySelector(`.node[data-node-id="${nodeId}"] .node-border`);

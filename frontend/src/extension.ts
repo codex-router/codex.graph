@@ -20,7 +20,7 @@ import { scheduleFileAnalysis } from './file-watching/handler';
 import { extractRepoStructure, formatHttpConnectionsForPrompt } from './repo-structure';
 
 // Analysis helpers
-import { withHttpEdges } from './analysis/helpers';
+import { withHttpEdges, runWithConcurrency } from './analysis/helpers';
 import { analyzeAndUpdateSingleFile } from './analysis/single-file';
 import { analyzeSelectedFiles } from './analysis/selected-files';
 import { analyzeWorkspace } from './analysis/workspace';
@@ -35,7 +35,8 @@ import { combineFilesXML, createDependencyBatches } from './file-preparation';
 import {
     setHttpConnections, setCrossFileCalls, setRepoFiles,
     getAnalysisSession, incrementAnalysisSession,
-    getPendingAnalysisTask, setPendingAnalysisTask, consumePendingAnalysisTask
+    getPendingAnalysisTask, setPendingAnalysisTask, consumePendingAnalysisTask,
+    initCallGraphPersistence
 } from './analysis/state';
 
 const outputChannel = vscode.window.createOutputChannel('Codag');
@@ -65,6 +66,9 @@ export async function activate(context: vscode.ExtensionContext) {
     await auth.initialize(); // Load token from secure storage
     const cache = new CacheManager(context);
     const webview = new WebviewManager(context);
+
+    // Initialize call graph persistence for instant local updates
+    initCallGraphPersistence(context);
 
     // Register URI handler for OAuth callbacks
     const uriHandler = vscode.window.registerUriHandler({
@@ -517,61 +521,56 @@ export async function activate(context: vscode.ExtensionContext) {
                 webview.notifyAnalysisStarted();
                 webview.startBatchProgress(batches.length);
 
-                // Process batches with concurrency limiting (parallel)
-                for (let i = 0; i < batches.length; i += maxConcurrency) {
-                    const batchSlice = batches.slice(i, i + maxConcurrency);
+                // Process batches with worker pool - each worker picks up next batch immediately
+                const batchTasks = batches.map((batch, batchIndex) => async () => {
+                    const batchPaths = batch.map(f => f.path);
+                    const batchMetadata = metadata.filter(m => batchPaths.includes(vscode.workspace.asRelativePath(m.file, false)));
+                    const combinedCode = combineFilesXML(batch, batchMetadata);
+                    const batchTokens = estimateTokens(combinedCode);
 
-                    const batchPromises = batchSlice.map(async (batch, sliceIndex) => {
-                        const batchIndex = i + sliceIndex;
-                        const batchPaths = batch.map(f => f.path);
-                        const batchMetadata = metadata.filter(m => batchPaths.includes(vscode.workspace.asRelativePath(m.file, false)));
-                        const combinedCode = combineFilesXML(batch, batchMetadata);
-                        const batchTokens = estimateTokens(combinedCode);
+                    log(`Analyzing batch ${batchIndex + 1}/${batches.length} (${batch.length} files, ~${Math.round(batchTokens / 1000)}k tokens)...`);
 
-                        log(`Analyzing batch ${batchIndex + 1}/${batches.length} (${batch.length} files, ~${Math.round(batchTokens / 1000)}k tokens)...`);
+                    try {
+                        const batchResult = await api.analyzeWorkflow(
+                            combinedCode,
+                            batchPaths,
+                            framework || undefined,
+                            batchMetadata,
+                            undefined,  // condensedStructure
+                            httpConnectionsContext
+                        );
 
-                        try {
-                            const batchResult = await api.analyzeWorkflow(
-                                combinedCode,
-                                batchPaths,
-                                framework || undefined,
-                                batchMetadata,
-                                undefined,  // condensedStructure
-                                httpConnectionsContext
-                            );
-
-                            // Check if session was invalidated (cache cleared) during request
-                            if (getAnalysisSession() !== sessionAtStart) {
-                                log(`Batch ${batchIndex + 1} result discarded (session invalidated)`);
-                                return null;
-                            }
-
-                            const batchGraph = batchResult.graph;
-
-                            if (batchResult.remainingAnalyses >= 0) {
-                                await auth.updateRemainingAnalyses(batchResult.remainingAnalyses);
-                            }
-
-                            newGraphs.push(batchGraph);
-
-                            // Cache per-file
-                            const contentMap: Record<string, string> = {};
-                            for (const f of batch) contentMap[f.path] = f.content;
-                            await cache.setAnalysisResult(batchGraph, contentMap);
-
-                            // Update progress only - graph updated once at end
-                            webview.batchCompleted(batch.length);
-
-                            log(`✓ Batch ${batchIndex + 1} complete: ${batchGraph.nodes.length} nodes`);
-                            return batchGraph;
-                        } catch (batchError: any) {
-                            log(`Batch ${batchIndex + 1} failed: ${batchError.message}`);
+                        // Check if session was invalidated (cache cleared) during request
+                        if (getAnalysisSession() !== sessionAtStart) {
+                            log(`Batch ${batchIndex + 1} result discarded (session invalidated)`);
                             return null;
                         }
-                    });
 
-                    await Promise.all(batchPromises);
-                }
+                        const batchGraph = batchResult.graph;
+
+                        if (batchResult.remainingAnalyses >= 0) {
+                            await auth.updateRemainingAnalyses(batchResult.remainingAnalyses);
+                        }
+
+                        newGraphs.push(batchGraph);
+
+                        // Cache per-file
+                        const contentMap: Record<string, string> = {};
+                        for (const f of batch) contentMap[f.path] = f.content;
+                        await cache.setAnalysisResult(batchGraph, contentMap);
+
+                        // Update progress only - graph updated once at end
+                        webview.batchCompleted(batch.length);
+
+                        log(`✓ Batch ${batchIndex + 1} complete: ${batchGraph.nodes.length} nodes`);
+                        return batchGraph;
+                    } catch (batchError: any) {
+                        log(`Batch ${batchIndex + 1} failed: ${batchError.message}`);
+                        return null;
+                    }
+                });
+
+                await runWithConcurrency(batchTasks, maxConcurrency);
 
                 // Final merge and completion
                 const mergedGraph = await cache.getMergedGraph(allFilePaths);

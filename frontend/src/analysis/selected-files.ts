@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { APIClient } from '../api';
 import { AuthManager } from '../auth';
 import { CacheManager } from '../cache';
@@ -14,14 +15,27 @@ import { extractRepoStructure, formatHttpConnectionsForPrompt } from '../repo-st
 import { createDependencyBatches, combineFilesXML } from '../file-preparation';
 import { CONFIG } from '../config';
 import { estimateTokens, calculateCost, formatCost } from '../cost-tracking';
-import { withHttpEdges } from './helpers';
+import { withHttpEdges, runWithConcurrency } from './helpers';
 import {
     getAnalysisSession,
     setHttpConnections,
     setCrossFileCalls,
-    getCrossFileCalls
-, setRepoFiles
+    getCrossFileCalls,
+    setRepoFiles,
+    setCachedCallGraph
 } from './state';
+import { extractCallGraph } from '../call-graph-extractor';
+
+/**
+ * Extract and cache call graphs for all files in a content map.
+ */
+function cacheCallGraphsForFiles(contentMap: Record<string, string>, workspaceRoot: string): void {
+    for (const [relativePath, content] of Object.entries(contentMap)) {
+        const absolutePath = path.join(workspaceRoot, relativePath);
+        const callGraph = extractCallGraph(content, relativePath);
+        setCachedCallGraph(absolutePath, callGraph);
+    }
+}
 
 /**
  * Context needed for selected files analysis.
@@ -98,6 +112,7 @@ export async function analyzeSelectedFiles(
             log('No workspace folder found');
             return;
         }
+        const workspaceRoot = workspaceFolder.uri.fsPath;
         const uncachedUris = fileContents.map(f => vscode.Uri.joinPath(workspaceFolder.uri, f.path));
         const metadata = await metadataBuilder.buildMetadata(uncachedUris);
 
@@ -128,91 +143,87 @@ export async function analyzeSelectedFiles(
         let totalInputTokens = 0;
         let totalOutputTokens = 0;
 
-        // Analyze batches
-        for (let i = 0; i < batches.length; i += maxConcurrency) {
-            const batchSlice = batches.slice(i, i + maxConcurrency);
+        // Analyze batches with worker pool - each worker picks up next batch immediately
+        const batchTasks = batches.map((batch, batchIndex) => async () => {
+            const batchMetadata = metadata.filter(m =>
+                batch.some(f => f.path === vscode.workspace.asRelativePath(m.file, false))
+            );
+            const combinedCode = combineFilesXML(batch, batchMetadata);
+            const batchTokens = estimateTokens(combinedCode);
 
-            const batchPromises = batchSlice.map(async (batch, sliceIndex) => {
-                const batchIndex = i + sliceIndex;
-                const batchMetadata = metadata.filter(m =>
-                    batch.some(f => f.path === vscode.workspace.asRelativePath(m.file, false))
+            log(`Analyzing batch ${batchIndex + 1}/${batches.length} (${batch.length} files, ~${Math.round(batchTokens / 1000)}k tokens)...`);
+            // DEBUG: Log files being sent to LLM
+            console.log(`[DEBUG] Batch ${batchIndex + 1} files:`, batch.map(f => f.path));
+
+            try {
+                const analyzeResult = await api.analyzeWorkflow(
+                    combinedCode,
+                    batch.map(f => f.path),
+                    framework || undefined,
+                    batchMetadata,
+                    undefined,  // condensedStructure
+                    httpConnectionsContext
                 );
-                const combinedCode = combineFilesXML(batch, batchMetadata);
-                const batchTokens = estimateTokens(combinedCode);
 
-                log(`Analyzing batch ${batchIndex + 1}/${batches.length} (${batch.length} files, ~${Math.round(batchTokens / 1000)}k tokens)...`);
-                // DEBUG: Log files being sent to LLM
-                console.log(`[DEBUG] Batch ${batchIndex + 1} files:`, batch.map(f => f.path));
-
-                try {
-                    const analyzeResult = await api.analyzeWorkflow(
-                        combinedCode,
-                        batch.map(f => f.path),
-                        framework || undefined,
-                        batchMetadata,
-                        undefined,  // condensedStructure
-                        httpConnectionsContext
-                    );
-
-                    // Check if session was invalidated (cache cleared) during request
-                    if (getAnalysisSession() !== sessionAtStart) {
-                        log(`Batch ${batchIndex + 1} result discarded (session invalidated)`);
-                        return null;
-                    }
-
-                    const graph = analyzeResult.graph;
-                    if (analyzeResult.remainingAnalyses >= 0) {
-                        await auth.updateRemainingAnalyses(analyzeResult.remainingAnalyses);
-                    }
-
-                    if (graph && graph.nodes) {
-                        newGraphs.push(graph);
-                        // DEBUG: Log nodes returned per file
-                        const nodesByFile = new Map<string, number>();
-                        for (const node of graph.nodes) {
-                            const file = node.source?.file || 'unknown';
-                            nodesByFile.set(file, (nodesByFile.get(file) || 0) + 1);
-                        }
-                        console.log(`[DEBUG] Batch ${batchIndex + 1} nodes by file:`, Object.fromEntries(nodesByFile));
-
-                        // Cache per-file (only successful results get cached)
-                        const contentMap: Record<string, string> = {};
-                        for (const f of batch) contentMap[f.path] = f.content;
-                        await cache.setAnalysisResult(graph, contentMap);
-
-                        // Track tokens
-                        totalInputTokens += batchTokens;
-                        totalOutputTokens += estimateTokens(JSON.stringify(graph));
-
-                        log(`✓ Batch ${batchIndex + 1} complete: ${graph.nodes.length} nodes`);
-
-                        // Incremental graph update - only if THIS batch added nodes
-                        if (graph.nodes.length > 0) {
-                            try {
-                                const currentMerged = await cache.getMergedGraph();
-                                if (currentMerged && currentMerged.nodes.length > 0) {
-                                    webview.updateGraph(withHttpEdges(currentMerged, log)!);
-                                }
-                            } catch (updateError: any) {
-                                log(`Warning: Incremental update failed: ${updateError.message}`);
-                            }
-                        }
-                    } else {
-                        // DEBUG: Log when no nodes returned
-                        console.log(`[DEBUG] Batch ${batchIndex + 1} returned NO nodes. Files were:`, batch.map(f => f.path));
-                    }
-
-                    webview.batchCompleted(batch.length);
-                    return graph;
-                } catch (error: any) {
-                    log(`Batch ${batchIndex + 1} failed: ${error.message}`);
-                    // Don't throw - let other batches continue
+                // Check if session was invalidated (cache cleared) during request
+                if (getAnalysisSession() !== sessionAtStart) {
+                    log(`Batch ${batchIndex + 1} result discarded (session invalidated)`);
                     return null;
                 }
-            });
 
-            await Promise.all(batchPromises);
-        }
+                const graph = analyzeResult.graph;
+                if (analyzeResult.remainingAnalyses >= 0) {
+                    await auth.updateRemainingAnalyses(analyzeResult.remainingAnalyses);
+                }
+
+                if (graph && graph.nodes) {
+                    newGraphs.push(graph);
+                    // DEBUG: Log nodes returned per file
+                    const nodesByFile = new Map<string, number>();
+                    for (const node of graph.nodes) {
+                        const file = node.source?.file || 'unknown';
+                        nodesByFile.set(file, (nodesByFile.get(file) || 0) + 1);
+                    }
+                    console.log(`[DEBUG] Batch ${batchIndex + 1} nodes by file:`, Object.fromEntries(nodesByFile));
+
+                    // Cache per-file (only successful results get cached)
+                    const contentMap: Record<string, string> = {};
+                    for (const f of batch) contentMap[f.path] = f.content;
+                    await cache.setAnalysisResult(graph, contentMap);
+                    cacheCallGraphsForFiles(contentMap, workspaceRoot);
+
+                    // Track tokens
+                    totalInputTokens += batchTokens;
+                    totalOutputTokens += estimateTokens(JSON.stringify(graph));
+
+                    log(`✓ Batch ${batchIndex + 1} complete: ${graph.nodes.length} nodes`);
+
+                    // Incremental graph update - only if THIS batch added nodes
+                    if (graph.nodes.length > 0) {
+                        try {
+                            const currentMerged = await cache.getMergedGraph();
+                            if (currentMerged && currentMerged.nodes.length > 0) {
+                                webview.updateGraph(withHttpEdges(currentMerged, log)!);
+                            }
+                        } catch (updateError: any) {
+                            log(`Warning: Incremental update failed: ${updateError.message}`);
+                        }
+                    }
+                } else {
+                    // DEBUG: Log when no nodes returned
+                    console.log(`[DEBUG] Batch ${batchIndex + 1} returned NO nodes. Files were:`, batch.map(f => f.path));
+                }
+
+                webview.batchCompleted(batch.length);
+                return graph;
+            } catch (error: any) {
+                log(`Batch ${batchIndex + 1} failed: ${error.message}`);
+                // Don't throw - let other batches continue
+                return null;
+            }
+        });
+
+        await runWithConcurrency(batchTasks, maxConcurrency);
 
         // Check if session was invalidated before displaying
         if (getAnalysisSession() !== sessionAtStart) {

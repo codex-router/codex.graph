@@ -73,10 +73,88 @@ export function consumePendingAnalysisTask(): (() => Promise<void>) | null {
 }
 
 // ============================================================================
-// Call Graph Cache
+// Call Graph Cache (with persistence)
 // ============================================================================
 
 const cachedCallGraphs = new Map<string, ExtractedCallGraph>();
+let extensionContext: { globalState: { get: (key: string) => any; update: (key: string, value: any) => Thenable<void> } } | null = null;
+const CALL_GRAPH_CACHE_KEY = 'codag.callGraphCache.v1';
+
+/** Serializable format for ExtractedCallGraph */
+interface SerializedCallGraph {
+    filePath: string;
+    functions: [string, any][];  // Array of [key, value] tuples
+    callGraph: [string, string[]][];
+    llmCalls: [string, any[]][];
+    imports: string[];
+    hash: string;
+}
+
+function serializeCallGraph(graph: ExtractedCallGraph): SerializedCallGraph {
+    return {
+        filePath: graph.filePath,
+        functions: Array.from(graph.functions.entries()),
+        callGraph: Array.from(graph.callGraph.entries()),
+        llmCalls: Array.from(graph.llmCalls.entries()),
+        imports: graph.imports,
+        hash: graph.hash
+    };
+}
+
+function deserializeCallGraph(data: SerializedCallGraph): ExtractedCallGraph {
+    return {
+        filePath: data.filePath,
+        functions: new Map(data.functions),
+        callGraph: new Map(data.callGraph),
+        llmCalls: new Map(data.llmCalls),
+        imports: data.imports,
+        hash: data.hash
+    };
+}
+
+/** Initialize call graph persistence with extension context */
+export function initCallGraphPersistence(ctx: { globalState: { get: (key: string) => any; update: (key: string, value: any) => Thenable<void> } }): void {
+    extensionContext = ctx;
+    loadCallGraphsFromStorage();
+}
+
+/** Load call graphs from persistent storage */
+function loadCallGraphsFromStorage(): void {
+    if (!extensionContext) return;
+
+    try {
+        const stored = extensionContext.globalState.get(CALL_GRAPH_CACHE_KEY) as Record<string, SerializedCallGraph> | undefined;
+        if (stored) {
+            cachedCallGraphs.clear();
+            for (const [key, value] of Object.entries(stored)) {
+                cachedCallGraphs.set(key, deserializeCallGraph(value));
+            }
+            console.log(`[CallGraph] Loaded ${cachedCallGraphs.size} cached call graphs`);
+        }
+    } catch (e) {
+        console.error('[CallGraph] Failed to load from storage:', e);
+    }
+}
+
+/** Save call graphs to persistent storage (debounced) */
+let saveTimeout: NodeJS.Timeout | null = null;
+function saveCallGraphsToStorage(): void {
+    if (!extensionContext) return;
+
+    // Debounce saves to avoid excessive writes
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+        try {
+            const toStore: Record<string, SerializedCallGraph> = {};
+            for (const [key, value] of cachedCallGraphs.entries()) {
+                toStore[key] = serializeCallGraph(value);
+            }
+            extensionContext!.globalState.update(CALL_GRAPH_CACHE_KEY, toStore);
+        } catch (e) {
+            console.error('[CallGraph] Failed to save to storage:', e);
+        }
+    }, 1000);
+}
 
 export function getCachedCallGraph(filePath: string): ExtractedCallGraph | undefined {
     return cachedCallGraphs.get(filePath);
@@ -84,6 +162,7 @@ export function getCachedCallGraph(filePath: string): ExtractedCallGraph | undef
 
 export function setCachedCallGraph(filePath: string, graph: ExtractedCallGraph): void {
     cachedCallGraphs.set(filePath, graph);
+    saveCallGraphsToStorage();
 }
 
 export function hasCachedCallGraph(filePath: string): boolean {
@@ -92,6 +171,9 @@ export function hasCachedCallGraph(filePath: string): boolean {
 
 export function clearCachedCallGraphs(): void {
     cachedCallGraphs.clear();
+    if (extensionContext) {
+        extensionContext.globalState.update(CALL_GRAPH_CACHE_KEY, undefined);
+    }
 }
 
 // ============================================================================

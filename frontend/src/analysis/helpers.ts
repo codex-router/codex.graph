@@ -3,6 +3,37 @@
  */
 
 import { WorkflowGraph } from '../api';
+
+/**
+ * Run tasks with bounded concurrency using a worker pool pattern.
+ * Unlike Promise.all on chunks, this immediately starts the next task
+ * when any worker finishes - no waiting for all N to complete.
+ *
+ * @param tasks - Array of async task functions to execute
+ * @param maxConcurrency - Maximum parallel tasks
+ * @returns Array of results in same order as tasks
+ */
+export async function runWithConcurrency<T>(
+    tasks: (() => Promise<T>)[],
+    maxConcurrency: number
+): Promise<T[]> {
+    const results: T[] = new Array(tasks.length);
+    let nextIndex = 0;
+
+    async function worker(): Promise<void> {
+        while (nextIndex < tasks.length) {
+            const index = nextIndex++;
+            results[index] = await tasks[index]();
+        }
+    }
+
+    // Spawn up to maxConcurrency workers, each pulls from shared queue
+    await Promise.all(
+        Array.from({ length: Math.min(maxConcurrency, tasks.length) }, worker)
+    );
+
+    return results;
+}
 import { addHttpConnectionEdges, addCrossFileCallEdges, addHttpCallerEdges } from '../edge-resolver';
 import { getHttpConnections, getCrossFileCalls, getRepoFiles } from './state';
 import { RawRepoStructure, FileStructure } from '../repo-structure';

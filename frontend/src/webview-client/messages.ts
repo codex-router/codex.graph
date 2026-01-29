@@ -6,7 +6,7 @@ import { openPanel } from './panel';
 import { layoutWorkflows } from './layout';
 import { renderGroups, updateGroupsIncremental } from './groups';
 import { renderEdges, updateEdgesIncremental } from './edges';
-import { renderNodes, updateNodesIncremental, pulseNodes, applyFileChangeState, hydrateLabels } from './nodes';
+import { renderNodes, updateNodesIncremental, fadeInNodes, applyFileChangeState, hydrateLabels, markNodesPending, clearNodesPending } from './nodes';
 import { dragstarted, dragged, dragended } from './drag';
 import { renderMinimap, pulseMinimapNodes } from './minimap';
 import { fitToScreen, formatGraph } from './controls';
@@ -20,8 +20,17 @@ declare const d3: any;
 
 // Debounce state for updateGraph to prevent jitter from rapid updates
 let pendingGraphUpdate: any = null;
+let pendingNodeIdsForUpdate: string[] = [];  // Nodes awaiting metadata
+let pendingFileChange: { filePath: string; functions: string[] } | null = null;  // File change to apply after render
 let updateDebounceTimer: number | null = null;
 const UPDATE_DEBOUNCE_MS = 150;
+
+// Track nodes currently in pending state (awaiting metadata)
+const pendingNodes = new Set<string>();
+
+// Track active file change states (survives re-renders)
+// filePath -> 'active' | 'changed'
+const activeFileChanges = new Map<string, 'active' | 'changed'>();
 
 export function setupMessageHandler(): void {
     const { svg, zoom } = state;
@@ -121,6 +130,12 @@ export function setupMessageHandler(): void {
                         functions?: string[];
                         state: 'active' | 'changed' | 'unchanged'
                     }) => {
+                        // Track state for re-application after re-renders
+                        if (change.state === 'unchanged') {
+                            activeFileChanges.delete(change.filePath);
+                        } else {
+                            activeFileChanges.set(change.filePath, change.state);
+                        }
                         applyFileChangeState(change.filePath, change.functions, change.state);
                     });
                 }
@@ -128,22 +143,36 @@ export function setupMessageHandler(): void {
 
             case 'hydrateLabels':
                 // Handle metadata batch results - update node labels smoothly
+                // Update nodes that are: (1) in pendingNodes set, OR (2) have a raw function name as label
+                // This handles both normal flow and recovery after webview reset
                 if (message.filePath && message.labels) {
-                    // Find nodes from this file and update their labels
                     const labelUpdates = new Map<string, string>();
                     const { currentGraphData } = state;
 
                     for (const node of currentGraphData.nodes) {
-                        if (node.source?.file === message.filePath) {
-                            // Match by function name
-                            const funcName = node.source.function;
-                            if (message.labels[funcName]) {
-                                labelUpdates.set(node.id, message.labels[funcName]);
-                            }
+                        if (node.source?.file !== message.filePath) continue;
+
+                        const funcName = node.source.function;
+                        const newLabel = message.labels[funcName];
+                        if (!newLabel) continue;
+
+                        // Check if node needs hydration:
+                        // 1. It's in the pending set (normal flow)
+                        // 2. Its current label matches function name (recovery after reset)
+                        const isPending = pendingNodes.has(node.id);
+                        const hasRawLabel = node.label === funcName || node.label === funcName.replace(/_/g, ' ');
+
+                        if (isPending || hasRawLabel) {
+                            labelUpdates.set(node.id, newLabel);
                         }
                     }
 
                     if (labelUpdates.size > 0) {
+                        // Clear pending state for nodes that got labels
+                        const nodeIdsWithLabels = Array.from(labelUpdates.keys());
+                        clearNodesPending(nodeIdsWithLabels);
+                        nodeIdsWithLabels.forEach(id => pendingNodes.delete(id));
+
                         hydrateLabels(labelUpdates);
 
                         notifications.show({
@@ -159,6 +188,14 @@ export function setupMessageHandler(): void {
                 if (message.preserveState && message.graph) {
                     // Debounce rapid updates to prevent jitter
                     pendingGraphUpdate = message.graph;
+                    // Accumulate pending node IDs across debounced updates
+                    if (message.pendingNodeIds && message.pendingNodeIds.length > 0) {
+                        pendingNodeIdsForUpdate = [...new Set([...pendingNodeIdsForUpdate, ...message.pendingNodeIds])];
+                    }
+                    // Capture file change (last one wins for same file)
+                    if (message.fileChange) {
+                        pendingFileChange = message.fileChange;
+                    }
 
                     if (updateDebounceTimer !== null) {
                         clearTimeout(updateDebounceTimer);
@@ -167,7 +204,11 @@ export function setupMessageHandler(): void {
                     updateDebounceTimer = window.setTimeout(async () => {
                         updateDebounceTimer = null;
                         const graphToApply = pendingGraphUpdate;
+                        const pendingIdsToApply = pendingNodeIdsForUpdate;
+                        const fileChangeToApply = pendingFileChange;
                         pendingGraphUpdate = null;
+                        pendingNodeIdsForUpdate = [];
+                        pendingFileChange = null;
 
                         if (!graphToApply) return;
 
@@ -178,22 +219,19 @@ export function setupMessageHandler(): void {
                             return;
                         }
 
-                        // Show loading indicator with update summary (don't hide progress bar)
+                        // Show loading notification with update summary
                         const addedCount = diff.nodes.added.length;
                         const removedCount = diff.nodes.removed.length;
                         const parts = [];
                         if (addedCount > 0) parts.push(`+${addedCount}`);
                         if (removedCount > 0) parts.push(`-${removedCount}`);
 
-                        indicator.className = 'loading-indicator';
-                        indicator.classList.remove('hidden');
-                        iconSpan.innerHTML = '<svg class="spinner-pill" viewBox="0 0 24 24" width="14" height="14"><rect x="8" y="2" width="8" height="20" rx="4" ry="4" fill="currentColor"/></svg>';
-                        // Only update text if progress bar is not visible (batch analysis in progress)
-                        const updateProgressBar = indicator.querySelector('.progress-bar-container') as HTMLElement;
-                        if (!updateProgressBar || updateProgressBar.style.display === 'none') {
-                            textSpan.textContent = `Updating: ${parts.join(', ')} nodes`;
+                        if (parts.length > 0) {
+                            notifications.show({
+                                type: 'loading',
+                                message: `Updating: ${parts.join(', ')} nodes`
+                            });
                         }
-                        indicator.style.display = 'block';
 
                         // Preserve collapsed states from old groups
                         const oldCollapsedIds = new Set(
@@ -283,23 +321,38 @@ export function setupMessageHandler(): void {
                         updateGroupVisibility();
                         updateSnapshotStats(state.workflowGroups, state.currentGraphData);
 
-                        // Pulse newly added nodes
+                        // Fade in newly added nodes
                         if (diff.nodes.added.length > 0) {
                             const newNodeIds = diff.nodes.added.map((n: any) => n.id);
-                            pulseNodes(newNodeIds);
+                            fadeInNodes(newNodeIds);
                             pulseMinimapNodes(newNodeIds);
                         }
 
-                        // Show success (only if not in batch progress)
-                        if (!updateProgressBar || updateProgressBar.style.display === 'none') {
-                            indicator.className = 'loading-indicator success';
-                            iconSpan.textContent = '✓';
-                            textSpan.textContent = 'Graph updated';
-                            setTimeout(() => {
-                                indicator.classList.add('hidden');
-                                setTimeout(() => indicator.style.display = 'none', 300);
-                            }, 2000);
+                        // Mark nodes as pending (awaiting metadata)
+                        if (pendingIdsToApply.length > 0) {
+                            markNodesPending(pendingIdsToApply);
+                            // Track in global set for cleanup when labels arrive
+                            pendingIdsToApply.forEach(id => pendingNodes.add(id));
                         }
+
+                        // Track and apply new file change state
+                        if (fileChangeToApply) {
+                            activeFileChanges.set(fileChangeToApply.filePath, 'active');
+                        }
+
+                        // Re-apply ALL active file change states after render
+                        // (CSS classes are lost when DOM elements are recreated)
+                        for (const [filePath, changeState] of activeFileChanges) {
+                            applyFileChangeState(filePath, undefined, changeState);
+                        }
+
+                        // Show success notification
+                        notifications.dismissType('loading');
+                        notifications.show({
+                            type: 'success',
+                            message: 'Graph updated',
+                            dismissMs: 2000
+                        });
                     }, UPDATE_DEBOUNCE_MS);
                 }
                 break;
@@ -365,14 +418,11 @@ export function setupMessageHandler(): void {
                 break;
 
             case 'authError':
-                // Show auth error in loading indicator
-                indicator.className = 'loading-indicator error';
-                iconSpan.textContent = '✕';
-                textSpan.textContent = message.error || 'Authentication failed';
-                indicator.style.display = 'block';
-                setTimeout(() => {
-                    indicator.style.display = 'none';
-                }, 4000);
+                notifications.show({
+                    type: 'error',
+                    message: message.error || 'Authentication failed',
+                    dismissMs: 4000
+                });
                 break;
 
             case 'closeFilePicker':
@@ -418,15 +468,12 @@ export function setupMessageHandler(): void {
                     // Update header stats
                     updateSnapshotStats(state.workflowGroups, state.currentGraphData);
 
-                    // Show success indicator
-                    indicator.className = 'loading-indicator success';
-                    iconSpan.textContent = '✓';
-                    textSpan.textContent = 'Loaded from cache';
-                    indicator.style.display = 'block';
-                    setTimeout(() => {
-                        indicator.classList.add('hidden');
-                        setTimeout(() => indicator.style.display = 'none', 300);
-                    }, 2000);
+                    // Show success notification
+                    notifications.show({
+                        type: 'success',
+                        message: 'Loaded from cache',
+                        dismissMs: 2000
+                    });
                 }
                 break;
         }

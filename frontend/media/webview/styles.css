@@ -764,6 +764,7 @@ body {
     font-size: 12px;
     font-weight: 500;
 }
+.type-badge.step { background: #78909C20; color: #78909C; }
 .type-badge.trigger { background: #FFB74D20; color: #FFB74D; }
 .type-badge.llm { background: #64B5F620; color: #64B5F6; }
 .type-badge.tool { background: #81C78420; color: #81C784; }
@@ -1520,6 +1521,22 @@ body {
 @keyframes minimap-pulse {
     0%, 100% { opacity: 0.6; }
     50% { opacity: 1; }
+}
+
+/* Pending metadata state - nodes awaiting LLM labels */
+.node-border.pending {
+    stroke: var(--vscode-editorWidget-border) !important;
+    stroke-dasharray: 4 4;
+    opacity: 0.7;
+}
+
+.node.pending .node-title-wrapper span {
+    font-style: italic;
+    opacity: 0.7;
+}
+
+.minimap-node.pending {
+    opacity: 0.5;
 }
 
 /* ============================================
