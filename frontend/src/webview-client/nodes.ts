@@ -158,6 +158,7 @@ export function renderNodes(
             return textH - 8;
         })
         .append('xhtml:div')
+        .attr('xmlns', 'http://www.w3.org/1999/xhtml')
         .attr('class', 'node-title-wrapper')
         .style('width', '100%')
         .style('height', '100%')
@@ -166,6 +167,7 @@ export function renderNodes(
         .style('justify-content', 'center');
 
     titleWrapper.append('xhtml:span')
+        .attr('xmlns', 'http://www.w3.org/1999/xhtml')
         .attr('lang', 'en')
         .style('text-align', 'center')
         .style('color', (d: any) => (d.type === 'llm' || d.type === 'workflow-title') ? '#ffffff' : 'var(--vscode-editor-foreground)')
@@ -596,6 +598,7 @@ function createNodeElement(nodeGroup: any, d: any): void {
         .attr('width', textW - 8)
         .attr('height', textH - 8)
         .append('xhtml:div')
+        .attr('xmlns', 'http://www.w3.org/1999/xhtml')
         .attr('class', 'node-title-wrapper')
         .style('width', '100%')
         .style('height', '100%')
@@ -604,6 +607,7 @@ function createNodeElement(nodeGroup: any, d: any): void {
         .style('justify-content', 'center');
 
     titleWrapper.append('xhtml:span')
+        .attr('xmlns', 'http://www.w3.org/1999/xhtml')
         .attr('lang', 'en')
         .style('text-align', 'center')
         .style('color', (d.type === 'llm' || d.type === 'workflow-title') ? '#ffffff' : 'var(--vscode-editor-foreground)')

@@ -548,11 +548,14 @@ export class WebviewManager {
         const nonce = this.getNonce();
 
         // Get URIs for static files
-        const stylesUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview', 'styles.css')
-        );
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview-client', 'main.js')
+        );
+        const d3Uri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview', 'd3.v7.min.js')
+        );
+        const fontsUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview', 'fonts')
         );
 
         // Stringify graph data safely
@@ -564,6 +567,11 @@ export class WebviewManager {
             graphJson = '{"nodes":[],"edges":[],"llms_detected":[],"workflows":[]}';
         }
 
+        // Read and process CSS with font URI replacement
+        const cssPath = path.join(this.context.extensionPath, 'media', 'webview', 'styles.css');
+        let css = fs.readFileSync(cssPath, 'utf8');
+        css = css.replace(/\{\{fontsUri\}\}/g, fontsUri.toString());
+
         // Read static HTML template
         const htmlPath = path.join(this.context.extensionPath, 'media', 'webview', 'index.html');
         let html = fs.readFileSync(htmlPath, 'utf8');
@@ -571,7 +579,9 @@ export class WebviewManager {
         // Replace placeholders
         html = html.replace(/\{\{nonce\}\}/g, nonce);
         html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
-        html = html.replace(/\{\{stylesUri\}\}/g, stylesUri.toString());
+        html = html.replace(/\{\{d3Uri\}\}/g, d3Uri.toString());
+        // Inline the processed CSS (with font URIs resolved)
+        html = html.replace(/\{\{inlineStyles\}\}/g, css);
 
         // Replace script tag with graph data injection and bundled script
         const loadingState = loadingOptions?.loading ? 'true' : 'false';

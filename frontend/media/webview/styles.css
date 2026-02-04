@@ -1,6 +1,30 @@
+/* DM Sans - bundled locally for reliable rendering */
+@font-face {
+    font-family: 'DM Sans';
+    src: url('{{fontsUri}}/dm-sans-400.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'DM Sans';
+    src: url('{{fontsUri}}/dm-sans-500.ttf') format('truetype');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'DM Sans';
+    src: url('{{fontsUri}}/dm-sans-600.ttf') format('truetype');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Hack Nerd Font - fallback to system monospace if unavailable */
 @font-face {
     font-family: 'Hack Nerd Font Mono';
-    src: url('https://cdn.jsdelivr.net/gh/ryanoasis/nerd-fonts@v3.1.1/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf') format('truetype');
+    src: local('Hack Nerd Font Mono'), local('HackNerdFontMono-Regular');
     font-weight: normal;
     font-style: normal;
     font-display: swap;
