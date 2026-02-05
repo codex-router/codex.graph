@@ -81,6 +81,10 @@ Every node links back to the exact function and line number. Click a node to ope
 
 Export your workflow graphs as high-resolution PNG images — the entire graph or individual workflows.
 
+### Native Theme Support
+
+Graphs automatically match your VS Code theme — light or dark. No configuration needed.
+
 <details>
 <summary><strong>Supported Providers & Frameworks</strong></summary>
 
