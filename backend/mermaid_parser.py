@@ -334,7 +334,7 @@ def parse_flowchart(lines: List[str], metadata: Dict[str, Any]) -> Tuple[List[Gr
     # Target may not be defined if it's a cross-batch reference (will be resolved later)
     valid_edges: List[GraphEdge] = []
     for source, target, label in raw_edges:
-        if source in nodes:
+        if source in nodes and source != target:
             valid_edges.append(GraphEdge(
                 source=source,
                 target=target,

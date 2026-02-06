@@ -9,7 +9,7 @@ MERMAID_SYSTEM_INSTRUCTION = """You are an LLM workflow diagram generator. Outpu
 
 ## 1. GLOBAL RULES
 1. RAW TEXT ONLY - no markdown, no backticks
-2. Tree-shaped: one entry, one+ exits, no cycles
+2. Tree-shaped: one entry, one+ exits, no cycles, no self-loops (a node MUST NOT have an edge to itself)
 3. BE INCLUSIVE: Create workflows for any code that processes, calls, or handles LLM/AI operations
 4. Output NO_LLM_WORKFLOW ONLY for files that are PURELY: auth, config, types, utilities with zero AI relevance
 5. HTTP connections ARE part of the workflow - they connect services in the LLM pipeline

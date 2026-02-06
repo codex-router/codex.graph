@@ -884,6 +884,9 @@ export class CacheManager {
             );
         }
 
+        // Remove self-loop edges (source === target) — never meaningful in a workflow
+        filteredEdges = filteredEdges.filter(e => e.source !== e.target);
+
         const result: WorkflowGraph = {
             nodes: filteredNodes,
             edges: filteredEdges,
