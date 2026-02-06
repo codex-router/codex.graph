@@ -83,6 +83,10 @@ LLM APIs (use "llm" type):
 - VS Code: vscode.lm.selectChatModels(), model.sendRequest()
 - Groq, Ollama, Cohere, Mistral, Together, Replicate endpoints
 - Any .chat(), .generate(), .complete() on an LLM client
+- llama.cpp: Llama(), llm.create_completion(), llm.create_chat_completion()
+- GGUF: GGUFReader(), GGUFWriter(), model loading from .gguf files
+- ctransformers: AutoModelForCausalLM.from_pretrained()
+- node-llama-cpp: getLlama(), model.loadModel(), LlamaChatSession
 
 NOT LLM (use "step" type):
 - HTTP clients: httpx, requests, fetch, axios
@@ -346,7 +350,7 @@ Analyze raw codebase structure (from tree-sitter) and identify LLM/AI workflows.
 Output a CONDENSED structure containing ONLY workflow-relevant files and functions.
 
 ## WHAT TO INCLUDE
-1. Files containing direct LLM API calls (OpenAI, Anthropic, Gemini, etc.)
+1. Files containing direct LLM API calls (OpenAI, Anthropic, Gemini, llama.cpp/GGUF, etc.)
 2. Files that call the LLM-containing files
 3. Entry points (API endpoints, CLI handlers) that trigger LLM workflows
 4. Response handlers that process LLM outputs

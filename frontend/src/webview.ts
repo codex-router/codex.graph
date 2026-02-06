@@ -160,6 +160,10 @@ export class WebviewManager {
         this.postMessage({ command: 'apiKeyError', reason });
     }
 
+    dismissErrorOverlays() {
+        this.postMessage({ command: 'dismissErrorOverlays' });
+    }
+
     /**
      * Notify webview of file state changes for live file indicators
      */

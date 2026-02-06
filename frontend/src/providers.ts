@@ -257,6 +257,55 @@ export const LLM_PROVIDERS: LLMProvider[] = [
     },
 
     // -------------------------------------------------------------------------
+    // Local/Quantized Model Providers
+    // -------------------------------------------------------------------------
+    {
+        id: 'llama-cpp',
+        displayName: 'llama.cpp / GGUF',
+        identifiers: ['llama_cpp', 'llama-cpp', 'llama.cpp', 'gguf', 'ggml', 'ctransformers'],
+        importPatterns: [
+            // Python: llama-cpp-python
+            /from\s+llama_cpp\s+import/i,
+            /import\s+llama_cpp/i,
+            /from\s+llama_cpp\b/i,
+            // Python: ctransformers (GGML/GGUF)
+            /from\s+ctransformers\s+import/i,
+            /import\s+ctransformers/i,
+            // Python: gguf package (reader/writer/converter)
+            /from\s+gguf\s+import/i,
+            /import\s+gguf/i,
+            // JS/TS: node-llama-cpp
+            /import\s+.*from\s+['"]node-llama-cpp['"]/,
+            /require\s*\(\s*['"]node-llama-cpp['"]\s*\)/,
+            // LangChain integration
+            /from\s+langchain.*import\s+LlamaCpp/i,
+            /from\s+langchain_community.*import\s+LlamaCpp/i,
+            // LlamaIndex integration
+            /from\s+llama_index.*LlamaCPP/i,
+        ],
+        callPatterns: [
+            // llama-cpp-python
+            /Llama\s*\(\s*model_path/,
+            /Llama\s*\(\s*['"]/,
+            /\.create_completion\s*\(/,
+            /\.create_chat_completion\s*\(/,
+            /\.create_embedding\s*\(/,
+            // ctransformers
+            /AutoModelForCausalLM\.from_pretrained/,
+            // gguf tools
+            /GGUFReader\s*\(/,
+            /GGUFWriter\s*\(/,
+            // node-llama-cpp
+            /getLlama\s*\(/,
+            /\.loadModel\s*\(/,
+            /LlamaChatSession\s*\(/,
+            /new\s+LlamaChatSession\s*\(/,
+            // GGUF file reference (model loading)
+            /['"][\w\-\/\\.]+\.gguf['"]/i,
+        ],
+    },
+
+    // -------------------------------------------------------------------------
     // IDE/Editor LLM APIs
     // -------------------------------------------------------------------------
     {
@@ -458,6 +507,8 @@ export const QUICK_SCAN_PATTERNS: RegExp[] = [
     /ChatCompletion/i,
     // Generic LLM term
     /\bllm\b/i,
+    // GGUF model files
+    /\.gguf\b/i,
 ];
 
 // =============================================================================

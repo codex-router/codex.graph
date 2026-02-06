@@ -78,6 +78,9 @@ export async function analyzeSelectedFiles(
         return;
     }
 
+    // Dismiss any lingering error overlay from a previous failed check
+    webview.dismissErrorOverlays();
+
     try {
         webview.showLoading('Analyzing selected files...');
 

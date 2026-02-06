@@ -78,6 +78,9 @@ export async function analyzeWorkspace(
         return;
     }
 
+    // Dismiss any lingering error overlay from a previous failed check
+    webview.dismissErrorOverlays();
+
     // Track analysis start time
     const startTime = Date.now();
     const sessionAtStart = getAnalysisSession();  // Capture session to detect invalidation

@@ -148,6 +148,14 @@ export function setupMessageHandler(): void {
                 break;
             }
 
+            case 'dismissErrorOverlays': {
+                const backendErr = document.getElementById('backendError');
+                if (backendErr) backendErr.style.display = 'none';
+                const apiKeyErr = document.getElementById('apiKeyError');
+                if (apiKeyErr) apiKeyErr.style.display = 'none';
+                break;
+            }
+
             case 'apiKeyError': {
                 notifications.dismissType('loading');
                 notifications.dismissType('progress');

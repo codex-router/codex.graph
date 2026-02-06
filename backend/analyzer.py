@@ -85,6 +85,16 @@ class StaticAnalyzer:
 
         # OpenRouter
         r"openrouter\.ai",
+
+        # llama.cpp / GGUF
+        r"from\s+llama_cpp\s+import",
+        r"import\s+llama_cpp",
+        r"from\s+ctransformers\s+import",
+        r"from\s+gguf\s+import",
+        r"import\s+gguf",
+        r"from\s+langchain.*import\s+LlamaCpp",
+        r"from\s+langchain_community.*import\s+LlamaCpp",
+        r"node-llama-cpp",
     ]
 
     # LLM API Call Patterns
@@ -96,6 +106,11 @@ class StaticAnalyzer:
         r"\.generateContent",
         r"\.chat\(",
         r"\.generate\(",
+        r"\.create_completion\(",
+        r"\.create_chat_completion\(",
+        r"Llama\s*\(",
+        r"GGUFReader\s*\(",
+        r"AutoModelForCausalLM\.from_pretrained",
     ]
 
     # Framework Patterns (keep for framework-specific detection)
@@ -181,6 +196,8 @@ class StaticAnalyzer:
             return "gemini"
         if re.search(r"from\s+ollama\s+import|import\s+ollama", code):
             return "ollama"
+        if re.search(r"from\s+llama_cpp\s+import|import\s+llama_cpp|from\s+gguf\s+import|from\s+ctransformers\s+import", code):
+            return "llama-cpp"
 
         # Check if it has any LLM patterns
         if StaticAnalyzer.detect_workflow(code):
