@@ -9,6 +9,155 @@ const NO_GRAPH = {
 };
 
 // ---------------------------------------------------------------------------
+// Call budget tracking
+// ---------------------------------------------------------------------------
+
+const SOFT_LIMIT = 6; // After this many calls to the same tool, nudge the agent
+
+const callCounts = new Map<string, number>();
+
+function trackCall(toolName: string): string | null {
+    const count = (callCounts.get(toolName) ?? 0) + 1;
+    callCounts.set(toolName, count);
+    if (count === SOFT_LIMIT) {
+        return `\n\n---\n⚠️ You've called ${toolName} ${count} times. You likely have enough context now — consider starting implementation.`;
+    }
+    if (count > SOFT_LIMIT) {
+        const total = [...callCounts.values()].reduce((a, b) => a + b, 0);
+        return `\n\n---\n⚠️ ${total} total Codag tool calls this session (${toolName}: ${count}). You have sufficient workflow context — start writing code.`;
+    }
+    return null;
+}
+
+export function wrapResult(toolName: string, data: unknown): string {
+    const json = JSON.stringify(data, null, 2);
+    const nudge = trackCall(toolName);
+    return nudge ? json + nudge : json;
+}
+
+// ---------------------------------------------------------------------------
+// initial_context — compact one-shot summary
+// ---------------------------------------------------------------------------
+
+export function initialContext(index: GraphIndex | null) {
+    if (!index) return NO_GRAPH;
+
+    const { graph } = index;
+
+    // Compact workflow summaries
+    const workflows = graph.workflows.map((wf) => {
+        const nodes = wf.nodeIds
+            .map((id) => index.nodeById.get(id))
+            .filter(Boolean) as WorkflowNode[];
+        const files = new Set<string>();
+        const llmNodes: Array<{ fn: string; model: string | null; file: string }> = [];
+        for (const n of nodes) {
+            if (n.source?.file) files.add(n.source.file);
+            if (n.type === "llm") {
+                llmNodes.push({
+                    fn: n.source?.function ?? n.label,
+                    model: n.model ?? null,
+                    file: n.source?.file ?? "",
+                });
+            }
+        }
+        return {
+            name: wf.name,
+            nodes: wf.nodeIds.length,
+            files: [...files],
+            llm_calls: llmNodes,
+        };
+    });
+
+    // File → workflow mapping (compact)
+    const fileMap: Record<string, string[]> = {};
+    for (const wf of graph.workflows) {
+        for (const nodeId of wf.nodeIds) {
+            const node = index.nodeById.get(nodeId);
+            if (node?.source?.file) {
+                if (!fileMap[node.source.file]) fileMap[node.source.file] = [];
+                if (!fileMap[node.source.file].includes(wf.name)) {
+                    fileMap[node.source.file].push(wf.name);
+                }
+            }
+        }
+    }
+
+    // Key cross-file edges
+    const crossFileEdges: Array<{ from: string; to: string; label: string | null }> = [];
+    for (const edge of graph.edges) {
+        const src = index.nodeById.get(edge.source);
+        const tgt = index.nodeById.get(edge.target);
+        if (src?.source?.file && tgt?.source?.file && src.source.file !== tgt.source.file) {
+            crossFileEdges.push({
+                from: `${src.source.file}::${src.source.function ?? "?"}`,
+                to: `${tgt.source.file}::${tgt.source.function ?? "?"}`,
+                label: edge.label ?? null,
+            });
+        }
+    }
+
+    return {
+        summary: {
+            total_nodes: graph.nodes.length,
+            total_edges: graph.edges.length,
+            total_workflows: graph.workflows.length,
+            llms_detected: graph.llms_detected,
+        },
+        workflows,
+        file_to_workflows: fileMap,
+        cross_file_edges: crossFileEdges.slice(0, 50), // Cap for token efficiency
+        graph_timestamp: new Date(index.timestamp).toISOString(),
+        hint: "Use get_file_context(files) for details on specific files you plan to modify. Use get_workflow(name) for full topology of a specific pipeline.",
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Graph summary resource (for auto-injection into system prompt)
+// ---------------------------------------------------------------------------
+
+export function graphSummaryResource(index: GraphIndex | null): string {
+    if (!index) return "No Codag graph available. Run the Codag VS Code extension to analyze the workspace.";
+
+    const { graph } = index;
+    const lines: string[] = [
+        `# Codag Workflow Graph`,
+        `${graph.nodes.length} nodes, ${graph.edges.length} edges, ${graph.workflows.length} workflows`,
+        `LLMs: ${graph.llms_detected.join(", ") || "none"}`,
+        ``,
+        `## Workflows`,
+    ];
+
+    for (const wf of graph.workflows) {
+        const nodes = wf.nodeIds
+            .map((id) => index.nodeById.get(id))
+            .filter(Boolean) as WorkflowNode[];
+        const llmCount = nodes.filter((n) => n.type === "llm").length;
+        const files = [...new Set(nodes.map((n) => n.source?.file).filter(Boolean))];
+        lines.push(`- **${wf.name}** (${nodes.length} nodes, ${llmCount} LLM calls) — ${files.join(", ")}`);
+    }
+
+    lines.push("", "## Files with LLM Workflow Code");
+    const fileSet = new Map<string, string[]>();
+    for (const wf of graph.workflows) {
+        for (const nodeId of wf.nodeIds) {
+            const node = index.nodeById.get(nodeId);
+            if (node?.source?.file) {
+                if (!fileSet.has(node.source.file)) fileSet.set(node.source.file, []);
+                if (!fileSet.get(node.source.file)!.includes(wf.name)) {
+                    fileSet.get(node.source.file)!.push(wf.name);
+                }
+            }
+        }
+    }
+    for (const [file, wfs] of fileSet) {
+        lines.push(`- \`${file}\` → ${wfs.join(", ")}`);
+    }
+
+    return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // list_workflows
 // ---------------------------------------------------------------------------
 
@@ -52,7 +201,6 @@ export function getWorkflow(index: GraphIndex | null, workflowName: string) {
     if (!index) return NO_GRAPH;
 
     const { graph } = index;
-    // Fuzzy match: case-insensitive substring
     const nameLower = workflowName.toLowerCase();
     const wf = graph.workflows.find(
         (w) =>
@@ -122,7 +270,6 @@ export function getNode(index: GraphIndex | null, nodeId: string) {
 
     const node = index.nodeById.get(nodeId);
     if (!node) {
-        // Try fuzzy: match by function name suffix
         const suffix = nodeId.toLowerCase();
         const match = [...index.nodeById.values()].find(
             (n) =>
@@ -197,10 +344,8 @@ export function getFileContext(index: GraphIndex | null, files: string[]) {
     const notFound: string[] = [];
 
     for (const file of files) {
-        // Fuzzy match: try exact, then suffix match
         let nodes = index.fileToNodes.get(file);
         if (!nodes) {
-            // Try suffix match (user might pass "src/api.ts" vs "frontend/src/api.ts")
             const fileLower = file.toLowerCase();
             for (const [key, val] of index.fileToNodes) {
                 if (key.toLowerCase().endsWith(fileLower) || fileLower.endsWith(key.toLowerCase())) {
@@ -222,7 +367,6 @@ export function getFileContext(index: GraphIndex | null, files: string[]) {
             const wf = index.nodeToWorkflow.get(n.id);
             if (wf) workflowNames.add(wf.name);
 
-            // Find connected files via edges
             for (const e of index.outgoingEdges.get(n.id) ?? []) {
                 const target = index.nodeById.get(e.target);
                 if (target?.source?.file) connectedFiles.add(target.source.file);
@@ -233,7 +377,6 @@ export function getFileContext(index: GraphIndex | null, files: string[]) {
             }
         }
 
-        // Remove self from connected files
         for (const n of nodes) {
             if (n.source?.file) connectedFiles.delete(n.source.file);
         }
