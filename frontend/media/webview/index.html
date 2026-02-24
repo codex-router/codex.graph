@@ -56,13 +56,14 @@
                 </svg>
             </div>
             <h2 class="error-overlay-title">Backend not running</h2>
-            <p class="error-overlay-desc">The Codag backend server is not reachable. This can happen if the server isn't started, or if the <code>GEMINI_API_KEY</code> is missing from <code>backend/.env</code>.</p>
+            <p class="error-overlay-desc">The Codag backend server is not reachable. This can happen if the server isn't started, or if LLM credentials are missing from <code>backend/.env</code>.</p>
             <div class="error-overlay-steps">
                 <div class="error-overlay-step">
                     <span class="error-overlay-step-num">1</span>
-                    <span>Make sure <code>backend/.env</code> contains your API key:</span>
+                    <span>Make sure <code>backend/.env</code> contains either Gemini or LiteLLM settings:</span>
                 </div>
                 <code class="error-overlay-code">GEMINI_API_KEY=your-key-here</code>
+                <code class="error-overlay-code">or: LITELLM_BASE_URL=... LITELLM_API_KEY=... LITELLM_MODEL=...</code>
                 <div class="error-overlay-step">
                     <span class="error-overlay-step-num">2</span>
                     <span>Start the backend server:</span>
@@ -85,8 +86,8 @@
                     <path d="M15 7a4 4 0 0 1-4 4H5m0 0V7m0 4l6.5 6.5M21 3l-6 6" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </div>
-            <h2 class="error-overlay-title">Invalid Gemini API key</h2>
-            <p class="error-overlay-desc">The Gemini API rejected the request. Your API key may be invalid or expired.</p>
+            <h2 class="error-overlay-title">Invalid LLM credentials</h2>
+            <p class="error-overlay-desc">The configured model provider rejected the request. Your Gemini or LiteLLM credentials may be invalid.</p>
             <div class="error-overlay-steps">
                 <div class="error-overlay-step">
                     <span class="error-overlay-step-num">1</span>
@@ -97,6 +98,7 @@
                     <span>Update <code>backend/.env</code>:</span>
                 </div>
                 <code class="error-overlay-code">GEMINI_API_KEY=your-new-key-here</code>
+                <code class="error-overlay-code">or set: LITELLM_BASE_URL, LITELLM_API_KEY, LITELLM_MODEL</code>
                 <div class="error-overlay-step">
                     <span class="error-overlay-step-num">3</span>
                     <span>Restart the backend:</span>

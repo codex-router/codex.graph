@@ -6,3 +6,7 @@ services:
       - "52104:52104"
     env_file:
       - backend/.env
+    environment:
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-}
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-}
+      - LITELLM_MODEL=${LITELLM_MODEL:-}

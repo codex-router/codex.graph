@@ -6,7 +6,7 @@ setup:
 		./venv/bin/pip install -r requirements.txt
 	@if [ ! -f backend/.env ]; then \
 		cp backend/.env.example backend/.env 2>/dev/null || echo "GEMINI_API_KEY=your-key-here" > backend/.env; \
-		echo "Created backend/.env - add your Gemini API key!"; \
+		echo "Created backend/.env - configure Gemini or LiteLLM credentials."; \
 	fi
 	@echo "Setting up frontend..."
 	cd frontend && npm install && npm run compile

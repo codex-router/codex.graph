@@ -10,8 +10,7 @@ from models import (
 )
 from prompts import build_metadata_only_prompt, USE_MERMAID_FORMAT
 from mermaid_parser import parse_mermaid_response
-from gemini_client import gemini_client
-from config import settings
+from gemini_client import llm_client
 
 app = FastAPI(title="Codag")
 
@@ -35,8 +34,8 @@ async def analyze_workflow(
     """
     Analyze code for LLM workflow patterns.
     """
-    if not gemini_client.client:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not llm_client.client:
+        raise HTTPException(status_code=503, detail=llm_client.missing_config_message())
 
     # Track cumulative cost across retries
     total_usage = TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0, cached_tokens=0)
@@ -78,7 +77,7 @@ async def analyze_workflow(
 
     # LLM analysis
     try:
-        result, usage, cost = await gemini_client.analyze_workflow(
+        result, usage, cost = await llm_client.analyze_workflow(
             request.code,
             metadata_dicts,
             http_connections=request.http_connections
@@ -136,7 +135,7 @@ B: {{file: "file.py", line: 10, function: "llm", type: "llm"}}
 
 Please re-analyze the code and output in the CORRECT format."""
                         try:
-                            result, retry_usage, retry_cost = await gemini_client.analyze_workflow(
+                            result, retry_usage, retry_cost = await llm_client.analyze_workflow(
                                 request.code,
                                 metadata_dicts,
                                 correction_prompt
@@ -180,8 +179,8 @@ async def analyze_metadata_only(request: MetadataRequest):
     Structure is already known from local tree-sitter analysis.
     Only needs LLM for human-readable labels and descriptions.
     """
-    if not gemini_client.client:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not llm_client.client:
+        raise HTTPException(status_code=503, detail=llm_client.missing_config_message())
     # Build prompt from structure context
     files_data = [f.model_dump() for f in request.files]
     prompt = build_metadata_only_prompt(files_data)
@@ -191,8 +190,7 @@ async def analyze_metadata_only(request: MetadataRequest):
         prompt += f"\n\nFull code for context:\n{request.code[:8000]}"
 
     try:
-        # Use gemini for metadata generation (simple prompt, no workflow system instruction)
-        result, usage, cost = await gemini_client.generate_metadata(prompt)
+        result, usage, cost = await llm_client.generate_metadata(prompt)
 
         # Clean markdown if present
         result = result.strip()
@@ -251,10 +249,10 @@ async def condense_structure(request: CondenseRequest):
     2. Identify LLM/AI workflow entry points
     3. Create condensed structure for cross-batch context
     """
-    if not gemini_client.client:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not llm_client.client:
+        raise HTTPException(status_code=503, detail=llm_client.missing_config_message())
     try:
-        condensed, usage, cost = await gemini_client.condense_repo_structure(request.raw_structure)
+        condensed, usage, cost = await llm_client.condense_repo_structure(request.raw_structure)
         return {
             "condensed_structure": condensed,
             "usage": usage.model_dump(),
@@ -266,16 +264,15 @@ async def condense_structure(request: CondenseRequest):
 
 @app.get("/health")
 async def health():
-    if not settings.gemini_api_key:
-        return {"status": "ok", "api_key_status": "missing"}
-
-    # Validate key with a lightweight SDK call
-    try:
-        list(gemini_client.client.models.list())
-        return {"status": "ok", "api_key_status": "valid"}
-    except Exception as e:
-        print(f"[HEALTH] Gemini API key invalid: {e}")
-        return {"status": "ok", "api_key_status": "invalid"}
+    api_key_status = await llm_client.check_health()
+    provider = llm_client.provider or "none"
+    model = llm_client.model if llm_client.provider else ""
+    return {
+        "status": "ok",
+        "api_key_status": api_key_status,
+        "provider": provider,
+        "model": model,
+    }
 
 
 if __name__ == "__main__":

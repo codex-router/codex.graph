@@ -34,6 +34,15 @@ Equivalent image reference:
 docker image ls craftslab/codex-graph:latest
 ```
 
+Provider configuration in `backend/.env`:
+
+- LiteLLM gateway:
+	- `LITELLM_BASE_URL=...`
+	- `LITELLM_API_KEY=...`
+	- `LITELLM_MODEL=...`
+
+`docker-compose.yml` also forwards these LiteLLM variables from host env when set.
+
 ## Test (Docker smoke test)
 
 Run:

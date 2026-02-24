@@ -52,5 +52,31 @@ if [ "${READY}" -ne 1 ]; then
 	exit 1
 fi
 
-echo "[4/4] Docker backend smoke test passed"
+echo "[4/4] Validating health payload"
+HEALTH_JSON="$(curl -fsS "${HEALTH_URL}")"
+if ! echo "${HEALTH_JSON}" | grep -q '"status"'; then
+	echo "Health response missing status field"
+	echo "Response: ${HEALTH_JSON}"
+	exit 1
+fi
+
+if ! echo "${HEALTH_JSON}" | grep -q '"api_key_status"'; then
+	echo "Health response missing api_key_status field"
+	echo "Response: ${HEALTH_JSON}"
+	exit 1
+fi
+
+if ! echo "${HEALTH_JSON}" | grep -q '"provider"'; then
+	echo "Health response missing provider field"
+	echo "Response: ${HEALTH_JSON}"
+	exit 1
+fi
+
+if ! echo "${HEALTH_JSON}" | grep -Eq '"provider"\s*:\s*"(none|gemini|litellm)"'; then
+	echo "Health response has unexpected provider value"
+	echo "Response: ${HEALTH_JSON}"
+	exit 1
+fi
+
+echo "Docker backend smoke test passed"
 echo "Backend is healthy at ${HEALTH_URL}"
