@@ -22,10 +22,16 @@ What it does:
 
 1. Validates Docker + Docker Compose availability
 2. Creates `backend/.env` from `backend/.env.example` when missing
-3. Builds `backend` service image via Compose:
+3. Builds `backend` service image via Compose as `craftslab/codex-graph:latest`:
 
 ```bash
 docker compose build backend
+```
+
+Equivalent image reference:
+
+```bash
+docker image ls craftslab/codex-graph:latest
 ```
 
 ## Test (Docker smoke test)

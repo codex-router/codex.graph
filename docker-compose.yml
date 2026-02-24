@@ -1,5 +1,6 @@
 services:
   backend:
+    image: craftslab/codex-graph:latest
     build: ./backend
     ports:
       - "52104:52104"
