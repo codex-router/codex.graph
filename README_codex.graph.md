@@ -43,6 +43,36 @@ Provider configuration in `backend/.env`:
 
 `docker-compose.yml` also forwards these LiteLLM variables from host env when set.
 
+## Generate Code Graph via REST API (LiteLLM only)
+
+The `example.sh` script calls the local backend REST API (`/analyze`) and prints the generated graph JSON.
+
+Prerequisites:
+
+- Backend already running on `localhost` (for example: `docker compose up -d backend`)
+- LiteLLM env vars set in your shell (must all be present):
+	- `LITELLM_BASE_URL`
+	- `LITELLM_API_KEY`
+	- `LITELLM_MODEL`
+
+Run:
+
+```bash
+export LITELLM_BASE_URL="http://your-litellm-gateway"
+export LITELLM_API_KEY="your-api-key"
+export LITELLM_MODEL="ollama-kimi-k2.5"
+
+./example.sh
+```
+
+Optional override (defaults to `http://localhost:52104`):
+
+```bash
+API_BASE_URL="http://localhost:52104" ./example.sh
+```
+
+The script verifies `/health` first and requires backend `provider` to be `litellm`.
+
 ## Test (Docker smoke test)
 
 Run:
