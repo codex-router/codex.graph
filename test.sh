@@ -4,6 +4,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+cleanup() {
+	echo "[cleanup] Stopping and removing test containers"
+	docker compose down --remove-orphans >/dev/null 2>&1 || true
+}
+
+trap cleanup EXIT
+
 if ! command -v docker >/dev/null 2>&1; then
 	echo "Error: docker is not installed or not in PATH."
 	exit 1
