@@ -45,6 +45,14 @@ LiteLLM variables:
 	- `LITELLM_BASE_URL=...`
 	- `LITELLM_API_KEY=...`
 	- `LITELLM_MODEL=...`
+	- `LITELLM_SSL_VERIFY=true|false` (default: `false`)
+	- `LITELLM_CA_BUNDLE=/path/to/ca.pem` (optional custom CA bundle)
+
+`LITELLM_BASE_URL` accepts either the OpenAI root path or full endpoint paths, for example:
+
+- `https://litellm.example/openai`
+- `https://litellm.example/openai/models`
+- `https://litellm.example/openai/chat/completions`
 
 `docker-compose.yml` no longer fails when `backend/.env` is missing.
 
@@ -70,6 +78,19 @@ export LITELLM_MODEL="ollama-gemini-3-flash-preview"
 ./example.sh
 ```
 
+Self-signed certificate options:
+
+```bash
+# Option A (quick test): disable TLS verification
+export LITELLM_SSL_VERIFY="false"
+
+# Option B (recommended): keep verification and trust your CA
+export LITELLM_SSL_VERIFY="true"
+export LITELLM_CA_BUNDLE="/path/to/ca.pem"
+
+./example.sh
+```
+
 Optional override (defaults to `http://localhost:52104`):
 
 ```bash
@@ -77,6 +98,10 @@ API_BASE_URL="http://localhost:52104" ./example.sh
 ```
 
 The script verifies `/health` first and requires backend `provider` to be `litellm`.
+
+If `/health` reports `api_key_status: missing` and Docker Compose is available, `example.sh` will try to recreate the backend container once to pick up current env vars.
+
+If `/health` reports a non-valid API key status, `example.sh` logs a warning and still validates end-to-end by calling `/analyze`.
 
 ## Test (Docker smoke test)
 

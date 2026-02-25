@@ -68,6 +68,8 @@ class LLMClient:
         self.litellm_base_url = settings.litellm_base_url.strip()
         self.litellm_api_key = settings.litellm_api_key.strip()
         self.litellm_model = settings.litellm_model.strip()
+        self.litellm_ssl_verify = settings.litellm_ssl_verify
+        self.litellm_ca_bundle = settings.litellm_ca_bundle.strip()
         self.provider = self._detect_provider()
         self.gemini_client = genai.Client(api_key=self.gemini_api_key) if self.gemini_api_key else None
         self.litellm_client = None
@@ -93,13 +95,32 @@ class LLMClient:
             return "gemini"
         return None
 
-    def _compute_config_signature(self) -> tuple[str, str, str, str]:
+    def _compute_config_signature(self) -> tuple[str, str, str, str, bool, str]:
         return (
             self.gemini_api_key,
             self.litellm_base_url,
             self.litellm_api_key,
             self.litellm_model,
+            self.litellm_ssl_verify,
+            self.litellm_ca_bundle,
         )
+
+    def _parse_env_bool(self, value: str, default: bool) -> bool:
+        if value is None:
+            return default
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return default
+
+    def _http_verify_option(self):
+        if not self.litellm_ssl_verify:
+            return False
+        if self.litellm_ca_bundle:
+            return self.litellm_ca_bundle
+        return True
 
     def _normalize_openai_base_url(self, base_url: str) -> str:
         normalized = base_url.strip().rstrip("/")
@@ -116,7 +137,7 @@ class LLMClient:
             "Authorization": f"Bearer {self.litellm_api_key}",
             "Accept": "application/json",
         }
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, verify=self._http_verify_option()) as client:
             response = await client.get(models_url, headers=headers)
             response.raise_for_status()
 
@@ -143,7 +164,7 @@ class LLMClient:
             "max_tokens": max_tokens,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, verify=self._http_verify_option()) as client:
             response = await client.post(chat_url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
@@ -171,17 +192,23 @@ class LLMClient:
         litellm_base_url = os.getenv("LITELLM_BASE_URL")
         litellm_api_key = os.getenv("LITELLM_API_KEY")
         litellm_model = os.getenv("LITELLM_MODEL")
+        litellm_ssl_verify = os.getenv("LITELLM_SSL_VERIFY")
+        litellm_ca_bundle = os.getenv("LITELLM_CA_BUNDLE")
 
         gemini_api_key = self.gemini_api_key if gemini_api_key is None else gemini_api_key.strip()
         litellm_base_url = self.litellm_base_url if litellm_base_url is None else litellm_base_url.strip()
         litellm_api_key = self.litellm_api_key if litellm_api_key is None else litellm_api_key.strip()
         litellm_model = self.litellm_model if litellm_model is None else litellm_model.strip()
+        litellm_ssl_verify = self._parse_env_bool(litellm_ssl_verify, self.litellm_ssl_verify)
+        litellm_ca_bundle = self.litellm_ca_bundle if litellm_ca_bundle is None else litellm_ca_bundle.strip()
 
         new_signature = (
             gemini_api_key,
             litellm_base_url,
             litellm_api_key,
             litellm_model,
+            litellm_ssl_verify,
+            litellm_ca_bundle,
         )
 
         if new_signature == self._config_signature:
@@ -191,6 +218,8 @@ class LLMClient:
         self.litellm_base_url = litellm_base_url
         self.litellm_api_key = litellm_api_key
         self.litellm_model = litellm_model
+        self.litellm_ssl_verify = litellm_ssl_verify
+        self.litellm_ca_bundle = litellm_ca_bundle
         self.provider = self._detect_provider()
 
         self.gemini_client = genai.Client(api_key=self.gemini_api_key) if self.gemini_api_key else None
