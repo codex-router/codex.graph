@@ -24,7 +24,34 @@ if [ -z "${LITELLM_BASE_URL}" ] || [ -z "${LITELLM_API_KEY}" ] || [ -z "${LITELL
 fi
 
 echo "[1/3] Checking backend health at ${HEALTH_URL}"
-HEALTH_JSON="$(curl -fsS "${HEALTH_URL}" 2>/dev/null || true)"
+HEALTH_JSON=""
+
+for _ in $(seq 1 30); do
+	HEALTH_JSON="$(curl -fsS "${HEALTH_URL}" 2>/dev/null || true)"
+	if [ -n "${HEALTH_JSON}" ]; then
+		break
+	fi
+	sleep 1
+done
+
+if [ -z "${HEALTH_JSON}" ] && echo "${API_BASE_URL}" | grep -Eq '^http://localhost:'; then
+	FALLBACK_API_BASE_URL="$(echo "${API_BASE_URL}" | sed 's#http://localhost:#http://127.0.0.1:#')"
+	FALLBACK_HEALTH_URL="${FALLBACK_API_BASE_URL}/health"
+	FALLBACK_ANALYZE_URL="${FALLBACK_API_BASE_URL}/analyze"
+
+	for _ in $(seq 1 10); do
+		HEALTH_JSON="$(curl -fsS "${FALLBACK_HEALTH_URL}" 2>/dev/null || true)"
+		if [ -n "${HEALTH_JSON}" ]; then
+			API_BASE_URL="${FALLBACK_API_BASE_URL}"
+			HEALTH_URL="${FALLBACK_HEALTH_URL}"
+			ANALYZE_URL="${FALLBACK_ANALYZE_URL}"
+			echo "Using fallback API base URL: ${API_BASE_URL}"
+			break
+		fi
+		sleep 1
+	done
+fi
+
 if [ -z "${HEALTH_JSON}" ]; then
 	echo "Error: codex.graph backend is not reachable at ${HEALTH_URL}"
 	echo "Start it first (for example): docker compose up -d backend"
