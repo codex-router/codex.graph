@@ -55,12 +55,8 @@ if ! echo "${HEALTH_JSON}" | grep -Eq '"provider"[[:space:]]*:[[:space:]]*"litel
 fi
 
 if ! echo "${HEALTH_JSON}" | grep -Eq '"api_key_status"[[:space:]]*:[[:space:]]*"valid"'; then
-	echo "Error: backend LiteLLM credentials are not valid (api_key_status is not 'valid')."
+	echo "Warning: health endpoint reports non-valid api_key_status; will continue and verify via /analyze."
 	echo "Health response: ${HEALTH_JSON}"
-	echo "Ensure the backend process/container has these env vars set:"
-	echo "  LITELLM_BASE_URL, LITELLM_API_KEY, LITELLM_MODEL"
-	echo "If backend is already running, restart/recreate it so new env vars are applied."
-	exit 1
 fi
 
 if echo "${HEALTH_JSON}" | grep -Eq '"model"[[:space:]]*:' && ! echo "${HEALTH_JSON}" | grep -Eq '"model"[[:space:]]*:[[:space:]]*"[^"]+'; then

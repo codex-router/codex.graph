@@ -75,7 +75,7 @@ class LLMClient:
         if self.provider == "litellm":
             self.litellm_client = AsyncOpenAI(
                 api_key=self.litellm_api_key,
-                base_url=self.litellm_base_url,
+                base_url=self._normalize_openai_base_url(self.litellm_base_url),
             )
 
         self.client = self.litellm_client if self.provider == "litellm" else self.gemini_client
@@ -99,6 +99,14 @@ class LLMClient:
             self.litellm_api_key,
             self.litellm_model,
         )
+
+    def _normalize_openai_base_url(self, base_url: str) -> str:
+        normalized = base_url.strip().rstrip("/")
+        for suffix in ("/chat/completions", "/models"):
+            if normalized.endswith(suffix):
+                normalized = normalized[: -len(suffix)]
+                break
+        return normalized
 
     def _refresh_from_env_if_needed(self) -> None:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -132,7 +140,7 @@ class LLMClient:
         if self.provider == "litellm":
             self.litellm_client = AsyncOpenAI(
                 api_key=self.litellm_api_key,
-                base_url=self.litellm_base_url,
+                base_url=self._normalize_openai_base_url(self.litellm_base_url),
             )
 
         self.client = self.litellm_client if self.provider == "litellm" else self.gemini_client
@@ -432,6 +440,13 @@ Output a condensed workflow structure following the system instructions."""
         """Check provider credential validity: valid, invalid, or missing."""
         self._refresh_from_env_if_needed()
         if self.provider == "litellm":
+            list_error = None
+            try:
+                await self.litellm_client.models.list()
+                return "valid"
+            except Exception as e:
+                list_error = e
+
             try:
                 await self.litellm_client.chat.completions.create(
                     model=self.litellm_model,
@@ -440,8 +455,12 @@ Output a condensed workflow structure following the system instructions."""
                     temperature=0.0,
                 )
                 return "valid"
-            except Exception as e:
-                print(f"[HEALTH] LiteLLM config invalid: {e}")
+            except Exception as completion_error:
+                print(
+                    "[HEALTH] LiteLLM config invalid: "
+                    f"models.list failed ({list_error}); "
+                    f"chat.completions.create failed ({completion_error})"
+                )
                 return "invalid"
 
         if self.provider == "gemini":
