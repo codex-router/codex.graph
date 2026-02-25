@@ -5,7 +5,8 @@ services:
     ports:
       - "52104:52104"
     env_file:
-      - backend/.env
+      - path: backend/.env
+        required: false
     environment:
       - LITELLM_BASE_URL=${LITELLM_BASE_URL:-}
       - LITELLM_API_KEY=${LITELLM_API_KEY:-}

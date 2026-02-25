@@ -21,7 +21,7 @@ Run from `codex.graph`:
 What it does:
 
 1. Validates Docker + Docker Compose availability
-2. Creates `backend/.env` from `backend/.env.example` when missing
+2. Optionally creates `backend/.env` from `backend/.env.example` when missing (for local defaults)
 3. Builds `backend` service image via Compose as `craftslab/codex-graph:latest`:
 
 ```bash
@@ -34,14 +34,19 @@ Equivalent image reference:
 docker image ls craftslab/codex-graph:latest
 ```
 
-Provider configuration in `backend/.env`:
+Provider configuration supports both `environment` and `env_file`:
+
+- Preferred: export variables in your shell (Compose `environment`)
+- Optional: put variables in `backend/.env` (Compose `env_file`, now optional)
+
+LiteLLM variables:
 
 - LiteLLM gateway:
 	- `LITELLM_BASE_URL=...`
 	- `LITELLM_API_KEY=...`
 	- `LITELLM_MODEL=...`
 
-`docker-compose.yml` also forwards these LiteLLM variables from host env when set.
+`docker-compose.yml` no longer fails when `backend/.env` is missing.
 
 ## Generate Code Graph via REST API (LiteLLM only)
 
