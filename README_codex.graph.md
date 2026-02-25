@@ -65,7 +65,7 @@ Run:
 ```bash
 export LITELLM_BASE_URL="http://your-litellm-gateway"
 export LITELLM_API_KEY="your-api-key"
-export LITELLM_MODEL="ollama-kimi-k2.5"
+export LITELLM_MODEL="ollama-gemini-3-flash-preview"
 
 ./example.sh
 ```
