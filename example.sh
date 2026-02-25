@@ -32,12 +32,26 @@ if [ -z "${HEALTH_JSON}" ]; then
 fi
 
 if ! echo "${HEALTH_JSON}" | grep -Eq '"provider"[[:space:]]*:[[:space:]]*"litellm"'; then
-	echo "Error: backend provider is not litellm"
+	if echo "${HEALTH_JSON}" | grep -Eq '"provider"[[:space:]]*:'; then
+		echo "Error: backend provider is not litellm"
+		echo "Health response: ${HEALTH_JSON}"
+		exit 1
+	fi
+fi
+
+if ! echo "${HEALTH_JSON}" | grep -Eq '"api_key_status"[[:space:]]*:[[:space:]]*"valid"'; then
+	echo "Error: backend LiteLLM credentials are not valid (api_key_status is not 'valid')."
 	echo "Health response: ${HEALTH_JSON}"
+	echo "Ensure the backend process/container has these env vars set:"
+	echo "  LITELLM_BASE_URL, LITELLM_API_KEY, LITELLM_MODEL"
 	exit 1
 fi
 
-if ! echo "${HEALTH_JSON}" | grep -Eq '"model"[[:space:]]*:[[:space:]]*"'
+if echo "${HEALTH_JSON}" | grep -Eq '"model"[[:space:]]*:' && ! echo "${HEALTH_JSON}" | grep -Eq '"model"[[:space:]]*:[[:space:]]*"[^"]+'; then
+	echo "Error: backend model is empty"
+	echo "Health response: ${HEALTH_JSON}"
+	exit 1
+fi
 
 echo "[2/3] Generating a sample code graph via ${ANALYZE_URL}"
 
