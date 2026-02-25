@@ -1,6 +1,7 @@
 import asyncio
 import re
 import os
+import httpx
 
 from google import genai
 from google.genai import types
@@ -107,6 +108,63 @@ class LLMClient:
                 normalized = normalized[: -len(suffix)]
                 break
         return normalized
+
+    async def _litellm_models_list_http(self) -> None:
+        base_url = self._normalize_openai_base_url(self.litellm_base_url)
+        models_url = f"{base_url}/models"
+        headers = {
+            "Authorization": f"Bearer {self.litellm_api_key}",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(models_url, headers=headers)
+            response.raise_for_status()
+
+    async def _litellm_chat_completion_http(
+        self,
+        user_prompt: str,
+        system_prompt: str,
+        max_tokens: int,
+    ) -> tuple[str, TokenUsage]:
+        base_url = self._normalize_openai_base_url(self.litellm_base_url)
+        chat_url = f"{base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.litellm_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.litellm_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "max_tokens": max_tokens,
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(chat_url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        choices = data.get("choices") or []
+        if not choices:
+            raise Exception("LiteLLM returned empty choices.")
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if content is None:
+            raise Exception("LiteLLM returned empty response content.")
+
+        usage_data = data.get("usage") or {}
+        prompt_tokens_details = usage_data.get("prompt_tokens_details") or {}
+        usage = TokenUsage(
+            input_tokens=usage_data.get("prompt_tokens", 0) or 0,
+            output_tokens=usage_data.get("completion_tokens", 0) or 0,
+            total_tokens=usage_data.get("total_tokens", 0) or 0,
+            cached_tokens=prompt_tokens_details.get("cached_tokens", 0) or 0,
+        )
+        return content, usage
 
     def _refresh_from_env_if_needed(self) -> None:
         gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -238,22 +296,12 @@ class LLMClient:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = await self.litellm_client.chat.completions.create(
-                    model=self.litellm_model,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_INSTRUCTION},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.0,
-                    top_p=1.0,
+                content, usage = await self._litellm_chat_completion_http(
+                    user_prompt=user_prompt,
+                    system_prompt=SYSTEM_INSTRUCTION,
                     max_tokens=65536,
                 )
-                choices = getattr(response, "choices", []) or []
-                if not choices or not choices[0].message or choices[0].message.content is None:
-                    raise Exception("LiteLLM returned empty response.")
-
-                usage = extract_openai_usage(response)
-                return choices[0].message.content, usage, zero_cost()
+                return content, usage, zero_cost()
             except Exception as e:
                 error_str = str(e)
                 if '429' in error_str or 'quota' in error_str.lower() or 'rate' in error_str.lower():
@@ -326,22 +374,12 @@ Output a condensed workflow structure following the system instructions."""
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = await self.litellm_client.chat.completions.create(
-                    model=self.litellm_model,
-                    messages=[
-                        {"role": "system", "content": CONDENSATION_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=0.0,
-                    top_p=1.0,
+                content, usage = await self._litellm_chat_completion_http(
+                    user_prompt=user_prompt,
+                    system_prompt=CONDENSATION_SYSTEM_PROMPT,
                     max_tokens=8192,
                 )
-                choices = getattr(response, "choices", []) or []
-                if not choices or not choices[0].message or choices[0].message.content is None:
-                    raise Exception("LiteLLM returned empty response.")
-
-                usage = extract_openai_usage(response)
-                return choices[0].message.content, usage, zero_cost()
+                return content, usage, zero_cost()
             except Exception as e:
                 error_str = str(e)
                 if '429' in error_str or 'quota' in error_str.lower():
@@ -410,20 +448,12 @@ Output a condensed workflow structure following the system instructions."""
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = await self.litellm_client.chat.completions.create(
-                    model=self.litellm_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    top_p=1.0,
+                content, usage = await self._litellm_chat_completion_http(
+                    user_prompt=prompt,
+                    system_prompt="You are a helpful assistant.",
                     max_tokens=8192,
                 )
-
-                choices = getattr(response, "choices", []) or []
-                if not choices or not choices[0].message or choices[0].message.content is None:
-                    raise Exception("LiteLLM returned empty response.")
-
-                usage = extract_openai_usage(response)
-                return choices[0].message.content, usage, zero_cost()
+                return content, usage, zero_cost()
 
             except Exception as e:
                 error_str = str(e)
@@ -440,19 +470,17 @@ Output a condensed workflow structure following the system instructions."""
         """Check provider credential validity: valid, invalid, or missing."""
         self._refresh_from_env_if_needed()
         if self.provider == "litellm":
-            list_error = None
             try:
-                await self.litellm_client.models.list()
+                await self._litellm_models_list_http()
                 return "valid"
             except Exception as e:
                 list_error = e
 
             try:
-                await self.litellm_client.chat.completions.create(
-                    model=self.litellm_model,
-                    messages=[{"role": "user", "content": "health check"}],
+                await self._litellm_chat_completion_http(
+                    user_prompt="health check",
+                    system_prompt="You are a health check assistant.",
                     max_tokens=1,
-                    temperature=0.0,
                 )
                 return "valid"
             except Exception as completion_error:
