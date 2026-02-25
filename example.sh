@@ -31,6 +31,21 @@ if [ -z "${HEALTH_JSON}" ]; then
 	exit 1
 fi
 
+if echo "${HEALTH_JSON}" | grep -Eq '"api_key_status"[[:space:]]*:[[:space:]]*"missing"'; then
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+		echo "Detected missing backend LLM config; recreating docker backend to pick up current environment..."
+		docker compose up -d --force-recreate backend >/dev/null
+
+		for _ in $(seq 1 30); do
+			HEALTH_JSON="$(curl -fsS "${HEALTH_URL}" 2>/dev/null || true)"
+			if [ -n "${HEALTH_JSON}" ]; then
+				break
+			fi
+			sleep 1
+		done
+	fi
+fi
+
 if ! echo "${HEALTH_JSON}" | grep -Eq '"provider"[[:space:]]*:[[:space:]]*"litellm"'; then
 	if echo "${HEALTH_JSON}" | grep -Eq '"provider"[[:space:]]*:'; then
 		echo "Error: backend provider is not litellm"
@@ -44,6 +59,7 @@ if ! echo "${HEALTH_JSON}" | grep -Eq '"api_key_status"[[:space:]]*:[[:space:]]*
 	echo "Health response: ${HEALTH_JSON}"
 	echo "Ensure the backend process/container has these env vars set:"
 	echo "  LITELLM_BASE_URL, LITELLM_API_KEY, LITELLM_MODEL"
+	echo "If backend is already running, restart/recreate it so new env vars are applied."
 	exit 1
 fi
 

@@ -1,5 +1,6 @@
 import asyncio
 import re
+import os
 
 from google import genai
 from google.genai import types
@@ -62,30 +63,80 @@ def zero_cost() -> CostData:
 class LLMClient:
     def __init__(self):
         self.gemini_model = 'gemini-2.5-flash'
+        self.gemini_api_key = settings.gemini_api_key.strip()
+        self.litellm_base_url = settings.litellm_base_url.strip()
+        self.litellm_api_key = settings.litellm_api_key.strip()
         self.litellm_model = settings.litellm_model.strip()
         self.provider = self._detect_provider()
-        self.gemini_client = genai.Client(api_key=settings.gemini_api_key) if settings.gemini_api_key else None
+        self.gemini_client = genai.Client(api_key=self.gemini_api_key) if self.gemini_api_key else None
         self.litellm_client = None
+        self._config_signature = self._compute_config_signature()
 
         if self.provider == "litellm":
             self.litellm_client = AsyncOpenAI(
-                api_key=settings.litellm_api_key,
-                base_url=settings.litellm_base_url,
+                api_key=self.litellm_api_key,
+                base_url=self.litellm_base_url,
             )
 
         self.client = self.litellm_client if self.provider == "litellm" else self.gemini_client
 
     def _detect_provider(self) -> str | None:
         has_litellm = all([
-            bool(settings.litellm_base_url.strip()),
-            bool(settings.litellm_api_key.strip()),
-            bool(settings.litellm_model.strip()),
+            bool(self.litellm_base_url),
+            bool(self.litellm_api_key),
+            bool(self.litellm_model),
         ])
         if has_litellm:
             return "litellm"
-        if settings.gemini_api_key:
+        if self.gemini_api_key:
             return "gemini"
         return None
+
+    def _compute_config_signature(self) -> tuple[str, str, str, str]:
+        return (
+            self.gemini_api_key,
+            self.litellm_base_url,
+            self.litellm_api_key,
+            self.litellm_model,
+        )
+
+    def _refresh_from_env_if_needed(self) -> None:
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        litellm_base_url = os.getenv("LITELLM_BASE_URL")
+        litellm_api_key = os.getenv("LITELLM_API_KEY")
+        litellm_model = os.getenv("LITELLM_MODEL")
+
+        gemini_api_key = self.gemini_api_key if gemini_api_key is None else gemini_api_key.strip()
+        litellm_base_url = self.litellm_base_url if litellm_base_url is None else litellm_base_url.strip()
+        litellm_api_key = self.litellm_api_key if litellm_api_key is None else litellm_api_key.strip()
+        litellm_model = self.litellm_model if litellm_model is None else litellm_model.strip()
+
+        new_signature = (
+            gemini_api_key,
+            litellm_base_url,
+            litellm_api_key,
+            litellm_model,
+        )
+
+        if new_signature == self._config_signature:
+            return
+
+        self.gemini_api_key = gemini_api_key
+        self.litellm_base_url = litellm_base_url
+        self.litellm_api_key = litellm_api_key
+        self.litellm_model = litellm_model
+        self.provider = self._detect_provider()
+
+        self.gemini_client = genai.Client(api_key=self.gemini_api_key) if self.gemini_api_key else None
+        self.litellm_client = None
+        if self.provider == "litellm":
+            self.litellm_client = AsyncOpenAI(
+                api_key=self.litellm_api_key,
+                base_url=self.litellm_base_url,
+            )
+
+        self.client = self.litellm_client if self.provider == "litellm" else self.gemini_client
+        self._config_signature = new_signature
 
     @property
     def model(self) -> str:
@@ -114,6 +165,7 @@ class LLMClient:
         http_connections: str = None
     ) -> tuple[str, TokenUsage, CostData]:
         """Analyze code for LLM workflow patterns using configured LLM provider."""
+        self._refresh_from_env_if_needed()
         user_prompt = build_user_prompt(code, metadata, http_connections)
 
         # If correction prompt provided, append it for retry
@@ -215,6 +267,7 @@ class LLMClient:
         Takes tree-sitter extracted structure and returns a condensed version
         containing only LLM/AI workflow-relevant files and functions.
         """
+        self._refresh_from_env_if_needed()
         user_prompt = f"""Analyze this codebase structure and identify LLM/AI workflows.
 
 <raw_structure>
@@ -298,6 +351,7 @@ Output a condensed workflow structure following the system instructions."""
 
         Used for incremental updates where we just need labels/descriptions.
         """
+        self._refresh_from_env_if_needed()
         if self.provider == "litellm":
             return await self._generate_metadata_with_litellm(prompt)
         if self.provider == "gemini":
@@ -376,6 +430,7 @@ Output a condensed workflow structure following the system instructions."""
 
     async def check_health(self) -> str:
         """Check provider credential validity: valid, invalid, or missing."""
+        self._refresh_from_env_if_needed()
         if self.provider == "litellm":
             try:
                 await self.litellm_client.chat.completions.create(
