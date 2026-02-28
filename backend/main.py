@@ -1,6 +1,9 @@
+import argparse
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import json
+import sys
 
 from models import (
     AnalyzeRequest, WorkflowGraph,
@@ -275,6 +278,153 @@ async def health():
     }
 
 
-if __name__ == "__main__":
+def _read_text_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fp:
+        return fp.read()
+
+
+def _load_json_from_text(raw_text: str, source_name: str):
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in {source_name}: {exc}") from exc
+
+
+def _build_cli_analyze_request(args: argparse.Namespace) -> AnalyzeRequest:
+    if args.request_json:
+        if args.request_json == "-":
+            raw_text = sys.stdin.read()
+            payload = _load_json_from_text(raw_text, "stdin")
+        else:
+            raw_text = _read_text_file(args.request_json)
+            payload = _load_json_from_text(raw_text, args.request_json)
+        return AnalyzeRequest.model_validate(payload)
+
+    if args.metadata_json and args.metadata_file:
+        raise ValueError("Use only one of --metadata-json or --metadata-file")
+
+    if args.http_connections and args.http_connections_file:
+        raise ValueError("Use only one of --http-connections or --http-connections-file")
+
+    code = (args.code or "").strip()
+    if not code and args.code_file:
+        code = _read_text_file(args.code_file)
+    if not code:
+        raise ValueError("code is required (use --code, --code-file, or --request-json)")
+
+    file_paths = []
+    for item in args.file_path or []:
+        normalized = (item or "").strip()
+        if normalized:
+            file_paths.append(normalized)
+    if args.file_paths:
+        for item in args.file_paths.split(","):
+            normalized = item.strip()
+            if normalized:
+                file_paths.append(normalized)
+    if not file_paths:
+        raise ValueError("file_paths is required (use --file-path/--file-paths or --request-json)")
+
+    metadata = []
+    if args.metadata_json:
+        parsed = _load_json_from_text(args.metadata_json, "--metadata-json")
+        if isinstance(parsed, list):
+            metadata = parsed
+        else:
+            raise ValueError("--metadata-json must be a JSON array")
+    elif args.metadata_file:
+        parsed = _load_json_from_text(_read_text_file(args.metadata_file), args.metadata_file)
+        if isinstance(parsed, list):
+            metadata = parsed
+        else:
+            raise ValueError("--metadata-file must contain a JSON array")
+
+    http_connections = args.http_connections
+    if http_connections is None and args.http_connections_file:
+        http_connections = _read_text_file(args.http_connections_file)
+
+    payload = {
+        "code": code,
+        "file_paths": file_paths,
+        "metadata": metadata,
+    }
+    if args.framework_hint:
+        payload["framework_hint"] = args.framework_hint
+    if http_connections is not None:
+        payload["http_connections"] = http_connections
+
+    return AnalyzeRequest.model_validate(payload)
+
+
+async def _run_cli_analyze(args: argparse.Namespace) -> int:
+    try:
+        request = _build_cli_analyze_request(args)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    try:
+        response = await analyze_workflow(request)
+    except HTTPException as exc:
+        print(json.dumps({"status_code": exc.status_code, "detail": exc.detail}, ensure_ascii=False), file=sys.stderr)
+        return 1
+
+    body = response.model_dump()
+    if args.pretty:
+        output_text = json.dumps(body, ensure_ascii=False, indent=2)
+    else:
+        output_text = json.dumps(body, ensure_ascii=False)
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as fp:
+            fp.write(output_text)
+    else:
+        print(output_text)
+    return 0
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="codex.graph backend")
+    subparsers = parser.add_subparsers(dest="command")
+
+    serve_parser = subparsers.add_parser("serve", help="Run HTTP API server")
+    serve_parser.add_argument("--host", default="0.0.0.0")
+    serve_parser.add_argument("--port", type=int, default=52104)
+
+    analyze_parser = subparsers.add_parser("analyze", help="Run one-shot analysis from CLI")
+    analyze_parser.add_argument("--request-json", help="Path to AnalyzeRequest JSON file, or '-' for stdin")
+    analyze_parser.add_argument("--code", help="Inline code text")
+    analyze_parser.add_argument("--code-file", help="Path to code text file")
+    analyze_parser.add_argument("--file-path", action="append", default=[], help="Single file path (repeatable)")
+    analyze_parser.add_argument("--file-paths", help="Comma-separated file paths")
+    analyze_parser.add_argument("--framework-hint", help="Optional framework hint")
+    analyze_parser.add_argument("--metadata-json", help="Metadata JSON array string")
+    analyze_parser.add_argument("--metadata-file", help="Path to metadata JSON array file")
+    analyze_parser.add_argument("--http-connections", help="HTTP connections context text")
+    analyze_parser.add_argument("--http-connections-file", help="Path to HTTP connections context file")
+    analyze_parser.add_argument("--output", help="Write JSON output to file instead of stdout")
+    analyze_parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    return parser
+
+
+def _main() -> int:
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+
+    if args.command == "analyze":
+        return asyncio.run(_run_cli_analyze(args))
+
+    host = "0.0.0.0"
+    port = 52104
+    if args.command == "serve":
+        host = args.host
+        port = args.port
+
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=52104)
+    uvicorn.run(app, host=host, port=port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

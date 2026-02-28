@@ -3,6 +3,7 @@
 This document covers the local Docker workflow for `codex.graph` using:
 
 - `build.sh` to build the backend image from `docker-compose.yml`
+- `Dockerfile_codex.graph` to build a CLI image for direct `main.py analyze` execution
 - `test.sh` to run a Docker smoke test and verify health endpoint readiness
 
 ## Prerequisites
@@ -23,6 +24,7 @@ What it does:
 1. Validates Docker + Docker Compose availability
 2. Optionally creates `backend/.env` from `backend/.env.example` when missing (for local defaults)
 3. Builds `backend` service image via Compose as `craftslab/codex-graph:latest`:
+4. Builds CLI image from `Dockerfile_codex.graph` as `craftslab/codex-graph-cli:latest` (or `CODEX_GRAPH_CLI_IMAGE` override)
 
 ```bash
 docker compose build backend
@@ -32,6 +34,10 @@ Equivalent image reference:
 
 ```bash
 docker image ls craftslab/codex-graph:latest
+```
+
+```bash
+docker image ls craftslab/codex-graph-cli:latest
 ```
 
 Provider configuration supports both `environment` and `env_file`:
@@ -102,6 +108,51 @@ The script verifies `/health` first and requires backend `provider` to be `litel
 If `/health` reports `api_key_status: missing` and Docker Compose is available, `example.sh` will try to recreate the backend container once to pick up current env vars.
 
 If `/health` reports a non-valid API key status, `example.sh` logs a warning and still validates end-to-end by calling `/analyze`.
+
+## Run `main.py` directly with args (no HTTP call)
+
+`backend/main.py` now supports one-shot CLI analysis so callers can execute graph generation without invoking `/analyze` over HTTP.
+
+From `codex.graph/backend`:
+
+```bash
+python3 main.py analyze \
+	--code-file /path/to/code.txt \
+	--file-path app.py \
+	--framework-hint python \
+	--pretty
+```
+
+You can also pass a full `AnalyzeRequest` JSON file:
+
+```bash
+python3 main.py analyze --request-json /path/to/analyze-request.json --pretty
+```
+
+`--request-json -` reads JSON from stdin.
+
+### Run via Docker CLI image (no HTTP call)
+
+`Dockerfile_codex.graph` sets:
+
+- `ENTRYPOINT ["python3", "main.py"]`
+- default `CMD ["analyze", "--code-file", "/path/to/code.txt", "--file-path", "app.py", "--framework-hint", "python", "--pretty"]`
+
+After `./build.sh`, run with explicit input file mapping (recommended):
+
+```bash
+docker run --rm \
+	-v /absolute/path/to/code.txt:/path/to/code.txt:ro \
+	craftslab/codex-graph-cli:latest
+```
+
+Or override the default command and stream a full AnalyzeRequest JSON from stdin:
+
+```bash
+cat /path/to/analyze-request.json | docker run --rm -i \
+	craftslab/codex-graph-cli:latest \
+	analyze --request-json -
+```
 
 ## Test (Docker smoke test)
 
