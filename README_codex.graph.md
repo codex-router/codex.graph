@@ -3,6 +3,7 @@
 This document covers the local Docker workflow for `codex.graph` using:
 
 - `build.sh` to build the backend image from `docker-compose.yml`
+- `run.sh` to run backend with plain `docker run` (compatible with `codex.serve` auto-start style)
 - `test.sh` to run a Docker smoke test and verify health endpoint readiness
 
 ## Prerequisites
@@ -33,6 +34,40 @@ Equivalent image reference:
 ```bash
 docker image ls craftslab/codex-graph:latest
 ```
+
+## Run with docker run (codex.serve compatible)
+
+`codex.serve` proxies graph generation through its own `POST /graph/run` endpoint, which avoids browser-side CSRF issues from direct cross-origin POST requests.
+
+To run `codex.graph` in the same plain Docker style used by `codex.serve`, use:
+
+```bash
+./run.sh
+```
+
+By default this starts:
+
+- image: `craftslab/codex-graph:latest`
+- container: `codex-graph`
+- host port: `52104` -> container port `52104`
+
+Optional overrides:
+
+```bash
+CODEX_GRAPH_IMAGE=craftslab/codex-graph:latest \
+GRAPH_CONTAINER_NAME=codex-graph \
+GRAPH_HOST_PORT=52104 \
+./run.sh
+```
+
+`run.sh` forwards these env vars into the container when present:
+
+- `GEMINI_API_KEY`
+- `LITELLM_BASE_URL`
+- `LITELLM_API_KEY`
+- `LITELLM_MODEL`
+- `LITELLM_SSL_VERIFY`
+- `LITELLM_CA_BUNDLE`
 
 Provider configuration supports both `environment` and `env_file`:
 
@@ -109,6 +144,12 @@ Run:
 
 ```bash
 ./test.sh
+```
+
+You can validate the `docker run` startup path directly (same runtime pattern expected by `codex.serve`) with:
+
+```bash
+GRAPH_START_MODE=run ./test.sh
 ```
 
 What it does:
